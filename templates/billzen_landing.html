@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BillZen AI — Smart GST Billing for India</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #0a0a0f; --card: #14141f; --border: rgba(255,255,255,0.07);
+      --purple: #7c3aed; --purple-light: #a78bfa; --purple-glow: rgba(124,58,237,0.35);
+      --gold: #f59e0b; --text: #f1f0ff; --muted: #8b8aa0; --green: #34d399;
+    }
+    html { scroll-behavior: smooth; }
+    body { font-family: 'DM Sans', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; overflow-x: hidden; }
+    .mesh { position: fixed; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; }
+    .blob { position: absolute; border-radius: 50%; filter: blur(120px); }
+    .blob1 { width: 600px; height: 600px; top: -200px; left: -100px; background: var(--purple); opacity: 0.18; }
+    .blob2 { width: 500px; height: 500px; bottom: -100px; right: -150px; background: #2563eb; opacity: 0.15; }
+    .blob3 { width: 300px; height: 300px; top: 40%; left: 40%; background: var(--gold); opacity: 0.06; }
+    nav {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 16px 40px; background: rgba(10,10,15,0.8);
+      backdrop-filter: blur(20px); border-bottom: 1px solid var(--border);
+    }
+    .nav-logo { font-family: 'Syne', sans-serif; font-size: 22px; font-weight: 800; display: flex; align-items: center; gap: 10px; text-decoration: none; }
+    .logo-icon { width: 34px; height: 34px; background: var(--purple); border-radius: 9px; display: grid; place-items: center; font-size: 16px; }
+    .logo-zen { color: var(--purple-light); }
+    .nav-links { display: flex; align-items: center; gap: 28px; list-style: none; }
+    .nav-links a { font-size: 14px; color: var(--muted); text-decoration: none; transition: color 0.2s; }
+    .nav-links a:hover { color: var(--text); }
+    .nav-btns { display: flex; gap: 10px; }
+    .btn-ghost { padding: 8px 20px; border: 1px solid var(--border); border-radius: 8px; color: var(--muted); font-size: 14px; font-family: 'DM Sans', sans-serif; background: transparent; cursor: pointer; text-decoration: none; transition: all 0.2s; }
+    .btn-ghost:hover { border-color: var(--purple-light); color: var(--text); }
+    .btn-primary { padding: 8px 22px; background: var(--purple); border: none; border-radius: 8px; color: #fff; font-size: 14px; font-family: 'DM Sans', sans-serif; font-weight: 500; cursor: pointer; text-decoration: none; transition: all 0.2s; box-shadow: 0 0 20px var(--purple-glow); }
+    .btn-primary:hover { background: #6d28d9; transform: translateY(-1px); }
+    .page { position: relative; z-index: 1; }
+    .hero { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 120px 24px 80px; }
+    .hero-badge { display: inline-flex; align-items: center; gap: 8px; padding: 6px 16px; background: rgba(124,58,237,0.12); border: 1px solid rgba(124,58,237,0.3); border-radius: 100px; font-size: 13px; color: var(--purple-light); margin-bottom: 32px; animation: fadeUp 0.6s ease both; }
+    .badge-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); box-shadow: 0 0 8px var(--green); animation: pulse 1.5s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+    .hero-title { font-family: 'Syne', sans-serif; font-size: clamp(42px, 7vw, 80px); font-weight: 800; line-height: 1.05; letter-spacing: -2px; max-width: 900px; animation: fadeUp 0.7s 0.1s ease both; }
+    .hero-title .accent { color: var(--purple-light); }
+    .hero-sub { margin-top: 24px; font-size: 18px; color: var(--muted); max-width: 540px; line-height: 1.7; font-weight: 300; animation: fadeUp 0.7s 0.2s ease both; }
+    .hero-actions { margin-top: 40px; display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; animation: fadeUp 0.7s 0.3s ease both; }
+    .btn-hero { padding: 14px 32px; font-size: 15px; border-radius: 10px; font-family: 'DM Sans', sans-serif; font-weight: 500; cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; gap: 8px; transition: all 0.2s; }
+    .btn-hp { background: var(--purple); color: #fff; border: none; box-shadow: 0 0 30px var(--purple-glow); }
+    .btn-hp:hover { background: #6d28d9; transform: translateY(-2px); }
+    .btn-hg { background: transparent; color: var(--muted); border: 1px solid var(--border); }
+    .btn-hg:hover { color: var(--text); border-color: rgba(255,255,255,0.2); }
+    .stats-strip { margin-top: 60px; display: flex; background: var(--card); border: 1px solid var(--border); border-radius: 16px; overflow: hidden; animation: fadeUp 0.7s 0.4s ease both; }
+    .stat-item { padding: 20px 36px; text-align: center; border-right: 1px solid var(--border); flex: 1; }
+    .stat-item:last-child { border-right: none; }
+    .stat-val { font-family: 'Syne', sans-serif; font-size: 24px; font-weight: 700; }
+    .stat-val em { color: var(--purple-light); font-style: normal; }
+    .stat-label { font-size: 12px; color: var(--muted); margin-top: 3px; text-transform: uppercase; letter-spacing: 0.5px; }
+    @keyframes fadeUp { from{opacity:0;transform:translateY(24px)} to{opacity:1;transform:translateY(0)} }
+    .section { padding: 100px 24px; max-width: 1100px; margin: 0 auto; }
+    .sec-label { font-size: 12px; text-transform: uppercase; letter-spacing: 2px; color: var(--purple-light); font-weight: 600; margin-bottom: 12px; }
+    .sec-title { font-family: 'Syne', sans-serif; font-size: clamp(28px, 4vw, 46px); font-weight: 700; letter-spacing: -1px; line-height: 1.15; max-width: 560px; }
+    .feat-grid { margin-top: 52px; display: grid; grid-template-columns: repeat(3,1fr); gap: 16px; }
+    .feat-card { background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 28px; transition: all 0.3s; position: relative; overflow: hidden; }
+    .feat-card::before { content:''; position:absolute; top:0; left:0; right:0; height:2px; background: linear-gradient(90deg, transparent, var(--purple), transparent); opacity:0; transition: opacity 0.3s; }
+    .feat-card:hover { border-color: rgba(124,58,237,0.35); transform: translateY(-4px); }
+    .feat-card:hover::before { opacity:1; }
+    .fi { width:44px; height:44px; border-radius:12px; display:grid; place-items:center; font-size:20px; margin-bottom:16px; }
+    .fi-p{background:rgba(124,58,237,0.15)} .fi-b{background:rgba(37,99,235,0.15)} .fi-g{background:rgba(52,211,153,0.12)} .fi-o{background:rgba(245,158,11,0.12)} .fi-pk{background:rgba(236,72,153,0.12)} .fi-c{background:rgba(6,182,212,0.12)}
+    .feat-name { font-family:'Syne',sans-serif; font-size:16px; font-weight:700; margin-bottom:8px; }
+    .feat-desc { font-size:14px; color:var(--muted); line-height:1.6; }
+    .hl-row { margin-top: 20px; display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+    .hl-card { border: 1px solid var(--border); border-radius: 20px; padding: 36px; position: relative; overflow: hidden; }
+    .hl-p { background: linear-gradient(135deg, rgba(124,58,237,0.2), rgba(124,58,237,0.04)); border-color: rgba(124,58,237,0.3); }
+    .hl-o { background: linear-gradient(135deg, rgba(245,158,11,0.1), rgba(245,158,11,0.02)); border-color: rgba(245,158,11,0.2); }
+    .hl-title { font-family:'Syne',sans-serif; font-size:20px; font-weight:700; margin: 16px 0 8px; }
+    .hl-desc { font-size:14px; color:var(--muted); line-height:1.7; margin-bottom:20px; }
+    .pills { display:flex; flex-wrap:wrap; gap:8px; }
+    .pill { padding:5px 12px; border-radius:100px; font-size:12px; font-weight:500; }
+    .pill-p { background:rgba(124,58,237,0.15); color:var(--purple-light); border:1px solid rgba(124,58,237,0.25); }
+    .pill-g { background:rgba(245,158,11,0.12); color:#fcd34d; border:1px solid rgba(245,158,11,0.2); }
+    .hl-deco { position:absolute; right:-20px; bottom:-20px; font-size:90px; opacity:0.06; }
+    .gst-box { margin-top:100px; background:var(--card); border:1px solid var(--border); border-radius:24px; padding:56px; text-align:center; position:relative; overflow:hidden; }
+    .gst-box::before { content:''; position:absolute; inset:0; background: radial-gradient(ellipse 60% 50% at 50% 0%, rgba(124,58,237,0.18), transparent 70%); }
+    .gst-box > * { position:relative; }
+    .green-badge { display:inline-block; padding:6px 18px; background:rgba(52,211,153,0.12); border:1px solid rgba(52,211,153,0.3); border-radius:100px; color:var(--green); font-size:13px; font-weight:500; margin-bottom:20px; }
+    .gst-title { font-family:'Syne',sans-serif; font-size:34px; font-weight:700; letter-spacing:-1px; margin-bottom:12px; }
+    .gst-sub { color:var(--muted); font-size:16px; max-width:480px; margin:0 auto 36px; }
+    .gst-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-bottom:36px; }
+    .gst-item { background:rgba(255,255,255,0.04); border:1px solid var(--border); border-radius:12px; padding:18px; }
+    .gst-val { font-family:'Syne',sans-serif; font-size:20px; font-weight:700; color:var(--green); }
+    .gst-lbl { font-size:12px; color:var(--muted); margin-top:4px; }
+    .cta-sec { padding:100px 24px; text-align:center; position:relative; }
+    .cta-sec::before { content:''; position:absolute; inset:0; background:radial-gradient(ellipse 80% 60% at 50% 50%, rgba(124,58,237,0.1), transparent 70%); }
+    .cta-sec > * { position:relative; }
+    .cta-title { font-family:'Syne',sans-serif; font-size:clamp(30px,5vw,54px); font-weight:800; letter-spacing:-1.5px; line-height:1.1; margin-bottom:16px; }
+    .cta-title em { color:var(--purple-light); font-style:normal; }
+    .cta-sub { color:var(--muted); font-size:16px; margin-bottom:40px; }
+    footer { border-top:1px solid var(--border); padding:28px 40px; display:flex; align-items:center; justify-content:space-between; color:var(--muted); font-size:13px; }
+    .foot-logo { font-family:'Syne',sans-serif; font-weight:700; font-size:15px; color:var(--text); }
+    .foot-logo span { color:var(--purple-light); }
+    .reveal { opacity:0; transform:translateY(30px); transition:opacity 0.6s ease, transform 0.6s ease; }
+    .reveal.visible { opacity:1; transform:translateY(0); }
+    @media(max-width:768px){
+      nav{padding:14px 20px;} .nav-links{display:none;}
+      .feat-grid{grid-template-columns:1fr 1fr;} .hl-row{grid-template-columns:1fr;}
+      .gst-grid{grid-template-columns:repeat(2,1fr);} .stats-strip{flex-direction:column;}
+      .stat-item{border-right:none; border-bottom:1px solid var(--border);}
+      .stat-item:last-child{border-bottom:none;} .gst-box{padding:36px 20px;}
+      footer{flex-direction:column; gap:10px; text-align:center;}
+    }
+    @media(max-width:500px){ .feat-grid{grid-template-columns:1fr;} }
+  </style>
+</head>
+<body>
+
+<div class="mesh">
+  <div class="blob blob1"></div>
+  <div class="blob blob2"></div>
+  <div class="blob blob3"></div>
+</div>
+
+<nav>
+  <a href="/" class="nav-logo">
+    <div class="logo-icon">⚡</div>
+    <span>Bill<span class="logo-zen">Zen AI</span></span>
+  </a>
+  <ul class="nav-links">
+    <li><a href="#features">Features</a></li>
+    <li><a href="#gst">GST</a></li>
+    <li><a href="#cta">About</a></li>
+  </ul>
+  <div class="nav-btns">
+    <a href="/login" class="btn-ghost">Login</a>
+    <a href="/login" class="btn-primary">Get Started →</a>
+  </div>
+</nav>
+
+<div class="page">
+
+  <section class="hero">
+    <div class="hero-badge">
+      <span class="badge-dot"></span>
+      AI-Powered GST Billing — Works on Phone &amp; Desktop
+    </div>
+    <h1 class="hero-title">
+      Smart Billing,<br/><span class="accent">Zero Headaches</span>
+    </h1>
+    <p class="hero-sub">
+      GST invoices, inventory tracking, customer ledgers, AI bill scanning — everything your shop needs, beautifully simple.
+    </p>
+    <div class="hero-actions">
+      <a href="/login" class="btn-hero btn-hp">⚡ Start Billing Now</a>
+      <a href="#features" class="btn-hero btn-hg">See Features ↓</a>
+    </div>
+    <div class="stats-strip">
+      <div class="stat-item"><div class="stat-val">₹<em>0</em></div><div class="stat-label">Hidden Charges</div></div>
+      <div class="stat-item"><div class="stat-val"><em>GST</em> Ready</div><div class="stat-label">GSTR-1 / GSTR-3B</div></div>
+      <div class="stat-item"><div class="stat-val"><em>AI</em> Scan</div><div class="stat-label">Purchase Bill OCR</div></div>
+      <div class="stat-item"><div class="stat-val"><em>∞</em></div><div class="stat-label">Products &amp; Customers</div></div>
+    </div>
+  </section>
+
+  <section class="section" id="features">
+    <div class="reveal">
+      <div class="sec-label">Features</div>
+      <h2 class="sec-title">Everything Your Shop Needs</h2>
+    </div>
+    <div class="feat-grid">
+      <div class="feat-card reveal"><div class="fi fi-p">🧾</div><div class="feat-name">Retail Billing</div><div class="feat-desc">Professional GST invoices in seconds. Print, PDF, or WhatsApp to customer directly.</div></div>
+      <div class="feat-card reveal"><div class="fi fi-b">🏭</div><div class="feat-name">Wholesale Billing</div><div class="feat-desc">Bulk orders, party-wise billing, credit terms. Built for high-volume wholesale businesses.</div></div>
+      <div class="feat-card reveal"><div class="fi fi-g">📦</div><div class="feat-name">Inventory Management</div><div class="feat-desc">Real-time stock, HSN codes, low stock alerts, auto deduction on every sale.</div></div>
+      <div class="feat-card reveal"><div class="fi fi-o">👥</div><div class="feat-name">Customer Ledger</div><div class="feat-desc">Full purchase history, outstanding balance, credit tracking — per customer.</div></div>
+      <div class="feat-card reveal"><div class="fi fi-pk">🤖</div><div class="feat-name">AI Purchase Scanning</div><div class="feat-desc">Scan supplier bills with phone camera. AI auto-fills product, qty and price instantly.</div></div>
+      <div class="feat-card reveal"><div class="fi fi-c">📊</div><div class="feat-name">GST Reports</div><div class="feat-desc">Auto CGST/SGST/IGST calculation. Export-ready for your CA or GST filing portal.</div></div>
+      <div class="feat-card reveal"><div class="fi fi-p">📱</div><div class="feat-name">Works on Phone</div><div class="feat-desc">Install on your Android or iPhone like an app. Bill anywhere, anytime — no internet needed after install!</div></div>
+      <div class="feat-card reveal"><div class="fi fi-pk">🤖</div><div class="feat-name">AI Business Assistant</div><div class="feat-desc">Ask anything in Hindi or English — "Aaj kitni sales?" "Pending payments?" "Low stock?" AI answers instantly from your real data!</div></div>
+      <div class="feat-card reveal"><div class="fi fi-g">🏦</div><div class="feat-name">Tally Export</div><div class="feat-desc">Select specific bills and export to Tally XML. Share with your CA in one click.</div></div>
+    </div>
+    <div class="hl-row">
+      <div class="hl-card hl-p reveal">
+        <div class="hl-deco">📱</div>
+        <div class="fi fi-p">📱</div>
+        <div class="hl-title">WhatsApp Billing</div>
+        <div class="hl-desc">One tap to send formatted invoice to customer's WhatsApp. Auto-fills number from ledger.</div>
+        <div class="pills"><span class="pill pill-p">Instant Share</span><span class="pill pill-p">Auto Format</span><span class="pill pill-p">Customer Auto-fill</span></div>
+      </div>
+      <div class="hl-card hl-o reveal">
+        <div class="hl-deco">☁️</div>
+        <div class="fi fi-o">☁️</div>
+        <div class="hl-title">Cloud + Backup</div>
+        <div class="hl-desc">Data saved securely. Full backup download anytime. Restore in one click from any device.</div>
+        <div class="pills"><span class="pill pill-g">One-click Backup</span><span class="pill pill-g">Excel Export</span><span class="pill pill-g">Instant Restore</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="gst">
+    <div class="gst-box reveal">
+      <div class="green-badge">✅ GST Compliant</div>
+      <div class="gst-title">Built for India's Tax System</div>
+      <div class="gst-sub">Auto-calculate CGST, SGST, IGST. HSN code tracking. Invoice-ready for every transaction.</div>
+      <div class="gst-grid">
+        <div class="gst-item"><div class="gst-val">CGST</div><div class="gst-lbl">Central GST</div></div>
+        <div class="gst-item"><div class="gst-val">SGST</div><div class="gst-lbl">State GST</div></div>
+        <div class="gst-item"><div class="gst-val">IGST</div><div class="gst-lbl">Integrated GST</div></div>
+        <div class="gst-item"><div class="gst-val">HSN</div><div class="gst-lbl">Code Tracking</div></div>
+      </div>
+      <a href="/login" class="btn-primary" style="padding:13px 32px;font-size:15px;">Start Free Today →</a>
+    </div>
+  </section>
+
+  <!-- PRICING -->
+  <section class="section" id="pricing">
+    <div style="text-align:center;margin-bottom:48px;">
+      <div class="sec-label">Pricing</div>
+      <h2 class="sec-title" style="max-width:100%;text-align:center;">One-Time Payment. Lifetime Access.</h2>
+      <p style="color:var(--muted);margin-top:12px;font-size:16px;">No monthly fees. No hidden charges. Pay once, use forever.</p>
+    </div>
+
+    <div class="pricing-grid" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;max-width:900px;margin:0 auto;">
+
+      <!-- MONTHLY -->
+      <div style="background:var(--card);border:1px solid var(--border);border-radius:20px;padding:32px 24px;text-align:center;">
+        <div style="font-size:13px;color:var(--muted);font-weight:600;margin-bottom:16px;text-transform:uppercase;letter-spacing:1px;">Monthly</div>
+        <div style="display:flex;align-items:flex-start;justify-content:center;gap:4px;margin-bottom:4px;">
+          <span style="font-size:18px;color:var(--muted);margin-top:6px;">₹</span>
+          <span style="font-family:'Syne',sans-serif;font-size:48px;font-weight:800;color:var(--text);line-height:1;">499</span>
+        </div>
+        <div style="color:var(--muted);font-size:13px;margin-bottom:24px;">per month</div>
+        <div style="text-align:left;margin-bottom:24px;font-size:13px;">
+          <div style="padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.05);color:var(--text);"><span style="color:#34d399;">✓</span> All core features</div>
+          <div style="padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.05);color:var(--text);"><span style="color:#34d399;">✓</span> GST Billing</div>
+          <div style="padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.05);color:var(--text);"><span style="color:#34d399;">✓</span> WhatsApp Sharing</div>
+          <div style="padding:6px 0;color:var(--muted);"><span style="color:#6b7280;">✗</span> AI Bill Scanner</div>
+        </div>
+        <a href="/login" style="display:block;padding:12px;background:transparent;color:var(--purple-light);border:1.5px solid rgba(124,58,237,0.4);border-radius:10px;font-size:14px;font-weight:600;text-decoration:none;">Get Started</a>
+      </div>
+
+      <!-- YEARLY - POPULAR -->
+      <div style="background:linear-gradient(135deg,rgba(124,58,237,0.2),rgba(124,58,237,0.05));border:2px solid rgba(124,58,237,0.5);border-radius:20px;padding:32px 24px;text-align:center;position:relative;">
+        <div style="position:absolute;top:-12px;left:50%;transform:translateX(-50%);background:var(--purple);color:white;padding:4px 16px;border-radius:100px;font-size:11px;font-weight:700;white-space:nowrap;">⭐ MOST POPULAR</div>
+        <div style="font-size:13px;color:var(--purple-light);font-weight:600;margin-bottom:16px;text-transform:uppercase;letter-spacing:1px;">Yearly</div>
+        <div style="display:flex;align-items:flex-start;justify-content:center;gap:4px;margin-bottom:4px;">
+          <span style="font-size:18px;color:var(--muted);margin-top:6px;">₹</span>
+          <span style="font-family:'Syne',sans-serif;font-size:48px;font-weight:800;color:var(--text);line-height:1;">2,999</span>
+        </div>
+        <div style="color:var(--muted);font-size:13px;margin-bottom:4px;">per year</div>
+        <div style="color:#34d399;font-size:12px;font-weight:600;margin-bottom:24px;">₹249/month — Save 50%! 🎉</div>
+        <div style="text-align:left;margin-bottom:24px;font-size:13px;">
+          <div style="padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.05);color:var(--text);"><span style="color:#34d399;">✓</span> All core features</div>
+          <div style="padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.05);color:var(--text);"><span style="color:#34d399;">✓</span> GST Billing + Tally</div>
+          <div style="padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.05);color:var(--text);"><span style="color:#34d399;">✓</span> WhatsApp + PDF</div>
+          <div style="padding:6px 0;color:var(--text);"><span style="color:#34d399;">✓</span> AI Bill Scanner</div>
+        </div>
+        <a href="/login" style="display:block;padding:12px;background:var(--purple);color:white;border-radius:10px;font-size:14px;font-weight:700;text-decoration:none;box-shadow:0 0 20px rgba(124,58,237,0.4);">Buy Now →</a>
+      </div>
+
+      <!-- LIFETIME -->
+      <div style="background:linear-gradient(135deg,rgba(245,158,11,0.15),rgba(245,158,11,0.03));border:2px solid rgba(245,158,11,0.5);border-radius:20px;padding:32px 24px;text-align:center;position:relative;">
+        <div style="position:absolute;top:-12px;left:50%;transform:translateX(-50%);background:linear-gradient(135deg,#f59e0b,#d97706);color:white;padding:4px 16px;border-radius:100px;font-size:11px;font-weight:700;white-space:nowrap;">🏆 BEST VALUE</div>
+        <div style="font-size:13px;color:var(--gold);font-weight:600;margin-bottom:16px;text-transform:uppercase;letter-spacing:1px;">Lifetime</div>
+        <div style="display:flex;align-items:flex-start;justify-content:center;gap:4px;margin-bottom:4px;">
+          <span style="font-size:18px;color:var(--muted);margin-top:6px;">₹</span>
+          <span style="font-family:'Syne',sans-serif;font-size:48px;font-weight:800;color:var(--text);line-height:1;">9,999</span>
+        </div>
+        <div style="color:var(--muted);font-size:13px;margin-bottom:4px;">one-time payment</div>
+        <div style="color:var(--gold);font-size:12px;font-weight:600;margin-bottom:24px;">Pay once. Use forever! 🏆</div>
+        <div style="text-align:left;margin-bottom:24px;font-size:13px;">
+          <div style="padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.05);color:var(--text);"><span style="color:#34d399;">✓</span> Everything in Yearly</div>
+          <div style="padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.05);color:var(--text);"><span style="color:#34d399;">✓</span> Lifetime updates</div>
+          <div style="padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.05);color:var(--text);"><span style="color:#34d399;">✓</span> Priority support</div>
+          <div style="padding:6px 0;color:var(--text);"><span style="color:#34d399;">✓</span> No fees ever!</div>
+        </div>
+        <a href="/login" style="display:block;padding:12px;background:linear-gradient(135deg,#f59e0b,#d97706);color:white;border-radius:10px;font-size:14px;font-weight:700;text-decoration:none;">Get Lifetime →</a>
+      </div>
+
+    </div>
+
+    <!-- old single card kept for comparison table below -->
+    <div style="display:none;max-width:500px;margin:0 auto;background:var(--card);border:2px solid rgba(124,58,237,0.4);border-radius:24px;padding:48px;text-align:center;position:relative;overflow:hidden;">
+      <!-- Glow -->
+      <div style="position:absolute;top:-50px;left:50%;transform:translateX(-50%);width:200px;height:200px;background:var(--purple);filter:blur(80px);opacity:0.2;border-radius:50%;"></div>
+      
+      <div style="position:relative;">
+        <div style="display:inline-block;background:linear-gradient(135deg,#7c3aed,#a855f7);color:white;padding:6px 20px;border-radius:100px;font-size:13px;font-weight:600;margin-bottom:20px;">⭐ Most Popular</div>
+        
+        <div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:700;color:var(--text);margin-bottom:8px;">BillZen AI — Lifetime</div>
+        
+        <div style="display:flex;align-items:flex-start;justify-content:center;gap:4px;margin:20px 0;">
+          <span style="font-size:24px;color:var(--muted);margin-top:8px;">₹</span>
+          <span style="font-family:'Syne',sans-serif;font-size:72px;font-weight:800;color:var(--text);line-height:1;">9,999</span>
+        </div>
+        <div style="color:var(--muted);font-size:14px;margin-bottom:8px;">One-time payment • Lifetime access</div>
+        <div style="background:rgba(52,211,153,0.1);border:1px solid rgba(52,211,153,0.3);border-radius:8px;padding:8px 16px;display:inline-block;color:#34d399;font-size:13px;font-weight:600;margin-bottom:32px;">
+          vs Competitors ₹15,000+/lifetime 🎯
+        </div>
+
+        <div style="text-align:left;margin-bottom:32px;">
+          <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.05);font-size:14px;color:var(--text);"><span style="color:#34d399;">✓</span> 🧾 Unlimited Retail &amp; Wholesale Bills</div>
+          <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.05);font-size:14px;color:var(--text);"><span style="color:#34d399;">✓</span> 🤖 AI Purchase Bill Scanner</div>
+          <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.05);font-size:14px;color:var(--text);"><span style="color:#34d399;">✓</span> 📱 Mobile + Desktop (PWA)</div>
+          <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.05);font-size:14px;color:var(--text);"><span style="color:#34d399;">✓</span> 📊 GST Reports + GSTR-1 JSON</div>
+          <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.05);font-size:14px;color:var(--text);"><span style="color:#34d399;">✓</span> 🏦 Tally XML Export</div>
+          <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.05);font-size:14px;color:var(--text);"><span style="color:#34d399;">✓</span> 📋 Quotation &amp; Delivery Challan</div>
+          <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.05);font-size:14px;color:var(--text);"><span style="color:#34d399;">✓</span> 💰 Customer Ledger &amp; Payments</div>
+          <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.05);font-size:14px;color:var(--text);"><span style="color:#34d399;">✓</span> 📱 WhatsApp Billing</div>
+          <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.05);font-size:14px;color:var(--text);"><span style="color:#34d399;">✓</span> ☁️ Cloud Backup &amp; Restore</div>
+          <div style="display:flex;align-items:center;gap:10px;padding:8px 0;font-size:14px;color:var(--text);"><span style="color:#34d399;">✓</span> 🔔 Payment Reminders</div>
+        </div>
+
+        <a href="/login" style="display:block;padding:16px 32px;background:var(--purple);color:white;border-radius:12px;font-size:16px;font-weight:700;text-decoration:none;">
+          🚀 Get BillZen AI Now
+        </a>
+      </div>
+    </div>
+
+    <!-- Comparison -->
+    <div style="max-width:600px;margin:40px auto 0;background:var(--card);border:0.5px solid var(--border);border-radius:16px;overflow:hidden;">
+      <div style="display:grid;grid-template-columns:2fr 1fr 1fr;font-size:12px;">
+        <div style="padding:12px 16px;font-weight:700;color:var(--muted);background:rgba(255,255,255,0.03);">FEATURE</div>
+        <div style="padding:12px;text-align:center;font-weight:700;color:var(--purple-light);background:rgba(124,58,237,0.08);">BillZen AI</div>
+        <div style="padding:12px;text-align:center;font-weight:700;color:var(--muted);">Others</div>
+        <div style="padding:10px 16px;border-top:1px solid var(--border);font-size:12px;color:var(--text);">AI Bill Scanner</div>
+        <div style="padding:10px;text-align:center;border-top:1px solid var(--border);background:rgba(124,58,237,0.05);font-weight:600;color:#34d399;">✅</div>
+        <div style="padding:10px;text-align:center;border-top:1px solid var(--border);color:var(--muted);">❌</div>
+        <div style="padding:10px 16px;border-top:1px solid var(--border);font-size:12px;color:var(--text);">WhatsApp Billing</div>
+        <div style="padding:10px;text-align:center;border-top:1px solid var(--border);background:rgba(124,58,237,0.05);font-weight:600;color:#34d399;">✅</div>
+        <div style="padding:10px;text-align:center;border-top:1px solid var(--border);color:var(--muted);">✅</div>
+        <div style="padding:10px 16px;border-top:1px solid var(--border);font-size:12px;color:var(--text);">Tally Export</div>
+        <div style="padding:10px;text-align:center;border-top:1px solid var(--border);background:rgba(124,58,237,0.05);font-weight:600;color:#34d399;">✅</div>
+        <div style="padding:10px;text-align:center;border-top:1px solid var(--border);color:var(--muted);">✅</div>
+        <div style="padding:10px 16px;border-top:1px solid var(--border);font-size:12px;color:var(--text);">One-time Price</div>
+        <div style="padding:10px;text-align:center;border-top:1px solid var(--border);background:rgba(124,58,237,0.05);font-weight:600;color:#34d399;">₹9,999</div>
+        <div style="padding:10px;text-align:center;border-top:1px solid var(--border);color:var(--muted);">₹15,000+</div>
+        <div style="padding:10px 16px;border-top:1px solid var(--border);font-size:12px;color:var(--text);">Monthly Fees</div>
+        <div style="padding:10px;text-align:center;border-top:1px solid var(--border);background:rgba(124,58,237,0.05);font-weight:600;color:#34d399;">None ✨</div>
+        <div style="padding:10px;text-align:center;border-top:1px solid var(--border);color:var(--muted);">₹200+/mo</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="cta-sec" id="cta">
+    <h2 class="cta-title">Ready to Simplify<br/><em>Your Business?</em></h2>
+    <p class="cta-sub">Join smart shop owners who bill faster with BillZen.</p>
+    <div style="display:flex;gap:14px;justify-content:center;flex-wrap:wrap;">
+      <a href="/login" class="btn-hero btn-hp">⚡ Get Started Free</a>
+      <a href="/login" class="btn-hero btn-hg">Login to Dashboard →</a>
+    </div>
+  </section>
+
+</div>
+
+<footer>
+  <div class="foot-logo">Bill<span>Zen AI</span></div>
+  <div>Smart GST Billing for Indian Businesses</div>
+  <div>© 2026 BillZen</div>
+</footer>
+
+<script>
+  const obs = new IntersectionObserver(entries => {
+    entries.forEach(e => { if(e.isIntersecting) e.target.classList.add('visible'); });
+  }, { threshold: 0.1 });
+  document.querySelectorAll('.reveal').forEach(el => obs.observe(el));
+</script>
+</body>
+</html>

@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BillZen — Login</title>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --purple:     #7C3AED;
+    --purple-mid: #9D5FF5;
+    --purple-lt:  #C4B5FD;
+    --purple-bg:  #F5F0FF;
+    --white:      #FFFFFF;
+    --dark:       #1A0A3C;
+    --gray:       #6B7280;
+    --gray-lt:    #F3F4F6;
+    --border:     #E5E7EB;
+    --error:      #EF4444;
+    --radius:     16px;
+    --shadow:     0 20px 60px rgba(124,58,237,0.15);
+  }
+
+  body {
+    font-family: 'Outfit', sans-serif;
+    background: linear-gradient(135deg, #F5F0FF 0%, #EDE9FE 50%, #DDD6FE 100%);
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  /* Background blobs */
+  body::before {
+    content: '';
+    position: fixed;
+    width: 600px; height: 600px;
+    background: radial-gradient(circle, rgba(124,58,237,0.12) 0%, transparent 70%);
+    top: -200px; right: -200px;
+    border-radius: 50%;
+    pointer-events: none;
+  }
+  body::after {
+    content: '';
+    position: fixed;
+    width: 400px; height: 400px;
+    background: radial-gradient(circle, rgba(167,139,250,0.1) 0%, transparent 70%);
+    bottom: -100px; left: -100px;
+    border-radius: 50%;
+    pointer-events: none;
+  }
+
+  .login-card {
+    background: var(--white);
+    border-radius: 24px;
+    padding: 48px 44px;
+    width: 100%;
+    max-width: 420px;
+    box-shadow: var(--shadow);
+    border: 1px solid rgba(124,58,237,0.1);
+    animation: slideUp 0.5s ease;
+    position: relative;
+    z-index: 1;
+  }
+
+  @keyframes slideUp {
+    from { opacity: 0; transform: translateY(30px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  .logo-wrap {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 8px;
+  }
+
+  .logo-icon {
+    width: 48px; height: 48px;
+    background: linear-gradient(135deg, var(--purple), var(--purple-mid));
+    border-radius: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 24px;
+    box-shadow: 0 8px 20px rgba(124,58,237,0.3);
+  }
+
+  .logo-text {
+    font-size: 28px;
+    font-weight: 800;
+    color: var(--dark);
+    letter-spacing: -0.5px;
+  }
+
+  .logo-text span {
+    color: var(--purple);
+  }
+
+  .tagline {
+    font-size: 14px;
+    color: var(--gray);
+    margin-bottom: 36px;
+    font-weight: 400;
+  }
+
+  .form-group {
+    margin-bottom: 20px;
+  }
+
+  label {
+    display: block;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--dark);
+    margin-bottom: 8px;
+    letter-spacing: 0.3px;
+  }
+
+  input {
+    width: 100%;
+    padding: 14px 16px;
+    border: 1.5px solid var(--border);
+    border-radius: var(--radius);
+    font-size: 15px;
+    font-family: 'Outfit', sans-serif;
+    color: var(--dark);
+    background: var(--gray-lt);
+    transition: all 0.2s;
+    outline: none;
+  }
+
+  input:focus {
+    border-color: var(--purple);
+    background: var(--white);
+    box-shadow: 0 0 0 4px rgba(124,58,237,0.1);
+  }
+
+  input::placeholder { color: #9CA3AF; }
+
+  .btn-login {
+    width: 100%;
+    padding: 15px;
+    background: linear-gradient(135deg, var(--purple), var(--purple-mid));
+    color: var(--white);
+    border: none;
+    border-radius: var(--radius);
+    font-size: 16px;
+    font-weight: 700;
+    font-family: 'Outfit', sans-serif;
+    cursor: pointer;
+    transition: all 0.2s;
+    margin-top: 8px;
+    letter-spacing: 0.3px;
+    box-shadow: 0 8px 20px rgba(124,58,237,0.3);
+  }
+
+  .btn-login:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 12px 28px rgba(124,58,237,0.4);
+  }
+
+  .btn-login:active { transform: translateY(0); }
+
+  .btn-login:disabled {
+    opacity: 0.7;
+    cursor: not-allowed;
+    transform: none;
+  }
+
+  .error-msg {
+    background: #FEF2F2;
+    border: 1px solid #FECACA;
+    color: var(--error);
+    padding: 12px 16px;
+    border-radius: 12px;
+    font-size: 13px;
+    margin-top: 16px;
+    display: none;
+    font-weight: 500;
+  }
+
+  .divider {
+    height: 1px;
+    background: var(--border);
+    margin: 28px 0;
+  }
+
+  .footer-text {
+    text-align: center;
+    font-size: 12px;
+    color: var(--gray);
+  }
+
+  .dots {
+    display: flex;
+    gap: 6px;
+    justify-content: center;
+    margin-top: 24px;
+  }
+
+  .dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--purple-lt);
+  }
+
+  .dot:nth-child(2) { background: var(--purple-mid); }
+  .dot:nth-child(3) { background: var(--purple); }
+</style>
+</head>
+<body>
+
+<div class="login-card" style="max-width:460px;">
+  <div class="logo-wrap">
+    <div class="logo-icon">💜</div>
+    <div class="logo-text">Bill<span>Zen AI</span></div>
+  </div>
+  <p class="tagline">Smart GST & Vyapar Billing System</p>
+
+  <div style="display:flex;gap:6px;margin-bottom:24px;background:#f3f4f6;padding:4px;border-radius:12px;">
+    <button type="button" id="tabLogin" onclick="switchMode('login')" style="flex:1;padding:10px;border:none;border-radius:8px;font-family:inherit;font-weight:700;font-size:13px;cursor:pointer;background:#fff;color:#7c3aed;box-shadow:0 2px 8px rgba(0,0,0,0.05);transition:all 0.2s;">Sign In</button>
+    <button type="button" id="tabRegister" onclick="switchMode('register')" style="flex:1;padding:10px;border:none;border-radius:8px;font-family:inherit;font-weight:600;font-size:13px;cursor:pointer;background:transparent;color:#6b7280;transition:all 0.2s;">New Registration</button>
+  </div>
+
+  <div id="loginForm">
+    <div class="form-group">
+      <label>Username</label>
+      <input type="text" id="username" placeholder="Enter username" autocomplete="username">
+    </div>
+
+    <div class="form-group">
+      <label>Password</label>
+      <input type="password" id="password" placeholder="Enter password" autocomplete="current-password">
+    </div>
+
+    <button class="btn-login" onclick="doLogin()" id="loginBtn">
+      Sign In →
+    </button>
+  </div>
+
+  <div id="registerForm" style="display:none;">
+    <div class="form-group">
+      <label>Your Name *</label>
+      <input type="text" id="regName" placeholder="e.g. Ramesh Kumar">
+    </div>
+    <div class="form-group">
+      <label>Shop / Business Name *</label>
+      <input type="text" id="regShopName" placeholder="e.g. Super Traders">
+    </div>
+    <div class="form-group">
+      <label>Mobile Number *</label>
+      <input type="tel" id="regPhone" placeholder="10-digit mobile number">
+    </div>
+    <div class="form-group">
+      <label>Choose Username *</label>
+      <input type="text" id="regUsername" placeholder="e.g. ramesh_traders">
+    </div>
+    <div class="form-group">
+      <label>Create Password *</label>
+      <input type="password" id="regPassword" placeholder="Minimum 6 characters">
+    </div>
+    <div class="form-group">
+      <label>GSTIN (Optional)</label>
+      <input type="text" id="regGstin" placeholder="e.g. 07AAAAA0000A1Z5">
+    </div>
+
+    <button class="btn-login" onclick="doRegister()" id="regBtn">
+      ⚡ Create Account & Start Billing →
+    </button>
+  </div>
+
+  <div class="error-msg" id="errMsg">❌ Invalid username or password</div>
+
+  <div class="divider"></div>
+  <p class="footer-text">© 2026 BillZen AI — Built for Indian Vyaparis</p>
+  <div class="dots">
+    <div class="dot"></div>
+    <div class="dot"></div>
+    <div class="dot"></div>
+  </div>
+</div>
+
+<script>
+  let currentMode = 'login';
+
+  function switchMode(mode) {
+    currentMode = mode;
+    const tabLog = document.getElementById('tabLogin');
+    const tabReg = document.getElementById('tabRegister');
+    const fLog = document.getElementById('loginForm');
+    const fReg = document.getElementById('registerForm');
+    const err = document.getElementById('errMsg');
+    err.style.display = 'none';
+
+    if (mode === 'login') {
+      tabLog.style.background = '#fff';
+      tabLog.style.color = '#7c3aed';
+      tabLog.style.boxShadow = '0 2px 8px rgba(0,0,0,0.05)';
+      tabReg.style.background = 'transparent';
+      tabReg.style.color = '#6b7280';
+      tabReg.style.boxShadow = 'none';
+      fLog.style.display = 'block';
+      fReg.style.display = 'none';
+    } else {
+      tabReg.style.background = '#fff';
+      tabReg.style.color = '#7c3aed';
+      tabReg.style.boxShadow = '0 2px 8px rgba(0,0,0,0.05)';
+      tabLog.style.background = 'transparent';
+      tabLog.style.color = '#6b7280';
+      tabLog.style.boxShadow = 'none';
+      fLog.style.display = 'none';
+      fReg.style.display = 'block';
+    }
+  }
+
+  // Check setup status on load
+  window.addEventListener('DOMContentLoaded', async () => {
+    try {
+      const res = await fetch('/api/setup-status');
+      const data = await res.json();
+      if (data.success && !data.has_users) {
+        switchMode('register');
+        const err = document.getElementById('errMsg');
+        err.style.display = 'block';
+        err.style.background = '#eff6ff';
+        err.style.borderColor = '#bfdbfe';
+        err.style.color = '#1d4ed8';
+        err.textContent = '👋 Welcome! Setup your shop and admin account to get started.';
+      }
+    } catch(e) {}
+  });
+
+  // Enter key trigger
+  document.addEventListener('keypress', function(e) {
+    if (e.key === 'Enter') {
+      if (currentMode === 'login') doLogin();
+      else doRegister();
+    }
+  });
+
+  async function doLogin() {
+    const username = document.getElementById('username').value.trim();
+    const password = document.getElementById('password').value.trim();
+    const btn      = document.getElementById('loginBtn');
+    const err      = document.getElementById('errMsg');
+
+    if (!username || !password) {
+      err.style.display = 'block';
+      err.style.background = '#fef2f2';
+      err.style.borderColor = '#fecaca';
+      err.style.color = '#ef4444';
+      err.textContent   = '⚠️ Please enter username and password';
+      return;
+    }
+
+    btn.disabled    = true;
+    btn.textContent = 'Signing in...';
+    err.style.display = 'none';
+
+    try {
+      const res  = await fetch('/api/login', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ username, password })
+      });
+      const data = await res.json();
+
+      if (data.success) {
+        btn.textContent = '✅ Success!';
+        setTimeout(() => window.location.href = '/dashboard', 400);
+      } else {
+        err.style.display = 'block';
+        err.style.background = '#fef2f2';
+        err.style.borderColor = '#fecaca';
+        err.style.color = '#ef4444';
+        err.textContent   = '❌ ' + (data.error || 'Invalid credentials');
+        btn.disabled    = false;
+        btn.textContent = 'Sign In →';
+      }
+    } catch(e) {
+      err.style.display = 'block';
+      err.textContent   = '❌ Cannot connect to server. Is app.py running?';
+      btn.disabled    = false;
+      btn.textContent = 'Sign In →';
+    }
+  }
+
+  async function doRegister() {
+    const name      = document.getElementById('regName').value.trim();
+    const shop_name = document.getElementById('regShopName').value.trim();
+    const phone     = document.getElementById('regPhone').value.trim();
+    const username  = document.getElementById('regUsername').value.trim();
+    const password  = document.getElementById('regPassword').value.trim();
+    const gstin     = document.getElementById('regGstin').value.trim();
+    const btn       = document.getElementById('regBtn');
+    const err       = document.getElementById('errMsg');
+
+    if (!name || !username || !password) {
+      err.style.display = 'block';
+      err.style.background = '#fef2f2';
+      err.style.borderColor = '#fecaca';
+      err.style.color = '#ef4444';
+      err.textContent = '⚠️ Please fill your name, username, and password';
+      return;
+    }
+    if (password.length < 6) {
+      err.style.display = 'block';
+      err.style.background = '#fef2f2';
+      err.style.borderColor = '#fecaca';
+      err.style.color = '#ef4444';
+      err.textContent = '⚠️ Password must be at least 6 characters';
+      return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = 'Creating Shop Account...';
+    err.style.display = 'none';
+
+    try {
+      const res = await fetch('/api/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ name, shop_name, phone, username, password, gstin })
+      });
+      const data = await res.json();
+      if (data.success) {
+        btn.textContent = '✅ Account Created! Loading...';
+        setTimeout(() => window.location.href = '/dashboard', 400);
+      } else {
+        err.style.display = 'block';
+        err.style.background = '#fef2f2';
+        err.style.borderColor = '#fecaca';
+        err.style.color = '#ef4444';
+        err.textContent = '❌ ' + (data.error || 'Registration failed');
+        btn.disabled = false;
+        btn.textContent = '⚡ Create Account & Start Billing →';
+      }
+    } catch(e) {
+      err.style.display = 'block';
+      err.textContent = '❌ Server error during registration';
+      btn.disabled = false;
+      btn.textContent = '⚡ Create Account & Start Billing →';
+    }
+  }
+</script>
+</body>
+</html>
