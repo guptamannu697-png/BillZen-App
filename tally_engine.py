@@ -490,23 +490,24 @@ def generate_tally_v2_xml(company_name, sales_list=None, purchases_list=None, le
         for it in items:
             q = float(it.get('qty', 1))
             pr = float(it.get('price', 0))
-            amt = round(q * pr, 2)
+            amt = float(it.get('taxable_amount', round(q * pr, 2)))
             taxable_sum += amt
             gst_pct = float(it.get('gst_pct', 18))
             if is_inter:
+                it_igst = float(it['igst_amount']) if 'igst_amount' in it and it['igst_amount'] is not None else round(amt * gst_pct / 100, 2)
                 if gst_pct >= 12:
-                    igst_18 += round(amt * gst_pct / 100, 2)
+                    igst_18 += it_igst
                 elif gst_pct > 0:
-                    igst_5 += round(amt * gst_pct / 100, 2)
+                    igst_5 += it_igst
             else:
+                it_cgst = float(it['cgst_amount']) if 'cgst_amount' in it and it['cgst_amount'] is not None else round(amt * (gst_pct / 2) / 100, 2)
+                it_sgst = float(it['sgst_amount']) if 'sgst_amount' in it and it['sgst_amount'] is not None else round(amt * (gst_pct / 2) / 100, 2)
                 if gst_pct >= 12:
-                    half = round(amt * (gst_pct / 2) / 100, 2)
-                    cgst_9 += half
-                    sgst_9 += half
+                    cgst_9 += it_cgst
+                    sgst_9 += it_sgst
                 elif gst_pct > 0:
-                    half = round(amt * (gst_pct / 2) / 100, 2)
-                    cgst_25 += half
-                    sgst_25 += half
+                    cgst_25 += it_cgst
+                    sgst_25 += it_sgst
 
         computed_total = taxable_sum + cgst_9 + sgst_9 + cgst_25 + sgst_25 + igst_18 + igst_5
         round_diff = round(total_amt - computed_total, 2)
@@ -625,23 +626,24 @@ def generate_tally_v2_xml(company_name, sales_list=None, purchases_list=None, le
         for it in items:
             q = float(it.get('qty', 1))
             pr = float(it.get('price', 0))
-            amt = round(q * pr, 2)
+            amt = float(it.get('taxable_amount', round(q * pr, 2)))
             taxable_sum += amt
             gst_pct = float(it.get('gst_pct', 18))
             if is_inter:
+                it_igst = float(it['igst_amount']) if 'igst_amount' in it and it['igst_amount'] is not None else round(amt * gst_pct / 100, 2)
                 if gst_pct >= 12:
-                    igst_18 += round(amt * gst_pct / 100, 2)
+                    igst_18 += it_igst
                 elif gst_pct > 0:
-                    igst_5 += round(amt * gst_pct / 100, 2)
+                    igst_5 += it_igst
             else:
+                it_cgst = float(it['cgst_amount']) if 'cgst_amount' in it and it['cgst_amount'] is not None else round(amt * (gst_pct / 2) / 100, 2)
+                it_sgst = float(it['sgst_amount']) if 'sgst_amount' in it and it['sgst_amount'] is not None else round(amt * (gst_pct / 2) / 100, 2)
                 if gst_pct >= 12:
-                    half = round(amt * (gst_pct / 2) / 100, 2)
-                    cgst_9 += half
-                    sgst_9 += half
+                    cgst_9 += it_cgst
+                    sgst_9 += it_sgst
                 elif gst_pct > 0:
-                    half = round(amt * (gst_pct / 2) / 100, 2)
-                    cgst_25 += half
-                    sgst_25 += half
+                    cgst_25 += it_cgst
+                    sgst_25 += it_sgst
 
         computed_total = taxable_sum + cgst_9 + sgst_9 + cgst_25 + sgst_25 + igst_18 + igst_5
         round_diff = round(total_amt - computed_total, 2)

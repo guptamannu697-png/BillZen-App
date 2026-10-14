@@ -374,7 +374,7 @@ tr:hover td{background:#FAFAFA;}
   <div class="content">
 
     <!-- ══════════════════ DASHBOARD ══════════════════ -->
-    <div class="page active" id="page-dashboard">
+    <div class="page active" id="page-dashboard" style="padding-bottom:70px;">
       <!-- 4 compact stat cards -->
       <div class="stat-grid" style="margin-bottom:12px;">
         <div class="stat-card" style="padding:12px 16px;">
@@ -523,10 +523,6 @@ tr:hover td{background:#FAFAFA;}
               <div class="form-group">
                 <label>Customer PAN</label>
                 <input type="text" id="s-cust-pan" placeholder="ABCDE1234F" style="text-transform:uppercase;">
-              </div>
-              <div class="form-group">
-                <label>Khata Pen Number</label>
-                <input type="text" id="s-khata-pen" placeholder="e.g. 104/A or Khata Ref">
               </div>
               <div class="form-group">
                 <label>Bill Date</label>
@@ -916,8 +912,8 @@ tr:hover td{background:#FAFAFA;}
           <option value="year">This Year</option>
         </select>
         <div style="display:flex;gap:6px;flex-wrap:wrap;">
-          <button onclick="exportReportMonth()" style="padding:6px 12px;background:#7c3aed;color:white;border:none;border-radius:7px;cursor:pointer;font-size:11px;font-weight:700;">📊 Export Month</button>
-          <button onclick="exportExcel('sales')" style="padding:6px 12px;background:#22c55e;color:white;border:none;border-radius:7px;cursor:pointer;font-size:11px;font-weight:700;">📊 Export All</button>
+          <button onclick="exportReportMonth()" style="padding:6px 12px;background:#7c3aed;color:white;border:none;border-radius:7px;cursor:pointer;font-size:11px;font-weight:700;">📊 Export Month (Excel)</button>
+          <button onclick="window.location.href='/api/reports/export/excel'; toast('📊 Downloading 6-Sheet Master Reports Workbook...');" style="padding:6px 12px;background:#22c55e;color:white;border:none;border-radius:7px;cursor:pointer;font-size:11px;font-weight:700;">📊 Export All (Excel)</button>
           <button onclick="openTallyModal()" style="padding:6px 12px;background:#0369a1;color:white;border:none;border-radius:7px;cursor:pointer;font-size:11px;font-weight:700;">🏦 Tally XML</button>
           <button onclick="backupData()" style="padding:6px 12px;background:#f3f0ff;color:#7c3aed;border:1.5px solid #e9d5ff;border-radius:7px;cursor:pointer;font-size:11px;font-weight:700;">⬇️ Backup</button>
           <button onclick="document.getElementById('restoreInputRep').click()" style="padding:6px 12px;background:#f0fdf4;color:#16a34a;border:1.5px solid #bbf7d0;border-radius:7px;cursor:pointer;font-size:11px;font-weight:700;">⬆️ Restore</button>
@@ -1013,11 +1009,14 @@ tr:hover td{background:#FAFAFA;}
             <button onclick="downloadGSTR1PortalJSON()" class="btn btn-primary" style="background:#7c3aed;border-color:#7c3aed;font-size:12px;font-weight:700;display:inline-flex;align-items:center;gap:5px;">
               📦 GSTR-1 Portal JSON
             </button>
-            <button onclick="downloadGSTR3BCSV()" class="btn btn-primary" style="background:#0284c7;border-color:#0284c7;font-size:12px;font-weight:700;display:inline-flex;align-items:center;gap:5px;">
-              📊 GSTR-3B CSV
+            <button onclick="downloadGSTExcel()" class="btn btn-primary" style="background:#0284c7;border-color:#0284c7;font-size:12px;font-weight:700;display:inline-flex;align-items:center;gap:5px;" title="Export GSTR-3B & 1 Audit Report in Excel">
+              📊 GSTR-3B Excel
             </button>
-            <button onclick="exportGSTReport()" class="btn btn-outline" style="font-size:12px;font-weight:600;display:inline-flex;align-items:center;gap:5px;">
-              📥 Drilldown CSV
+            <button onclick="downloadGSTExcel()" class="btn btn-outline" style="font-size:12px;font-weight:600;display:inline-flex;align-items:center;gap:5px;" title="Export Rate-Wise GST Drilldown in Excel">
+              📥 Drilldown Excel
+            </button>
+            <button onclick="downloadGSTExcel()" class="btn btn-primary" style="background:#16a34a;border-color:#16a34a;font-size:12px;font-weight:700;display:inline-flex;align-items:center;gap:5px;" title="Export Official CA Audit Report in Excel">
+              📊 GST CA Excel
             </button>
             <a href="https://services.gst.gov.in/services/login" target="_blank" class="btn btn-outline" style="font-size:12px;font-weight:600;display:inline-flex;align-items:center;gap:5px;">
               🏛️ GST Portal ↗
@@ -1204,14 +1203,14 @@ tr:hover td{background:#FAFAFA;}
               </div>
             </div>
             <div>
-              <button onclick="exportGSTDrilldownCSV()" class="btn btn-outline" style="font-size:12px;padding:6px 12px;display:inline-flex;align-items:center;gap:4px;">
-                📥 Export Drilldown CSV
+              <button onclick="downloadGSTExcel()" class="btn btn-outline" style="font-size:12px;padding:6px 12px;display:inline-flex;align-items:center;gap:4px;" title="Export Hierarchical Rate Drilldown in Excel">
+                📥 Export Drilldown Excel
               </button>
             </div>
           </div>
 
           <div style="padding:16px;">
-            <!-- Slab summary cards (18%, 5%, 0%) -->
+            <!-- Slab summary cards (28%, 18%, 12%, 5%, 0%) -->
             <div id="gstRateCardsContainer" style="display:grid;grid-template-columns:repeat(auto-fit, minmax(280px, 1fr));gap:12px;margin-bottom:16px;">
               <div style="text-align:center;color:var(--gray);padding:16px;grid-column:1/-1;">Loading GST rate breakdown...</div>
             </div>
@@ -1482,9 +1481,12 @@ tr:hover td{background:#FAFAFA;}
               <div class="form-group">
                 <label style="font-weight:700;font-size:13px;">Original Sales Bill ID *</label>
                 <div style="display:flex;gap:8px;">
-                  <input type="text" id="ret-billid" placeholder="e.g. S2604241FC1" style="flex:1;border-radius:8px;">
-                  <button onclick="fetchReturnBill()" style="padding:9px 16px;background:#7c3aed;color:white;border:none;border-radius:8px;cursor:pointer;font-weight:700;font-size:12px;display:inline-flex;align-items:center;gap:4px;">
+                  <input type="text" id="ret-billid" placeholder="e.g. S2604241FC1" style="flex:1;border-radius:8px;" onkeydown="if(event.key==='Enter'){event.preventDefault();fetchReturnBill();}">
+                  <button type="button" onclick="fetchReturnBill()" style="padding:9px 16px;background:#7c3aed;color:white;border:none;border-radius:8px;cursor:pointer;font-weight:700;font-size:12px;display:inline-flex;align-items:center;gap:4px;">
                     🔍 Fetch Bill
+                  </button>
+                  <button type="button" onclick="clearSalesReturnForm()" style="padding:9px 14px;background:#f1f5f9;color:#475569;border:1.5px solid #cbd5e1;border-radius:8px;cursor:pointer;font-weight:600;font-size:12px;display:inline-flex;align-items:center;gap:4px;" title="Clear fetched bill & reset form">
+                    ✕ Clear
                   </button>
                 </div>
               </div>
@@ -1493,7 +1495,10 @@ tr:hover td{background:#FAFAFA;}
               <div id="ret-bill-info" style="display:none;background:#f5f3ff;border:1.5px solid #ddd6fe;border-radius:10px;padding:12px;margin-bottom:14px;">
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
                   <span style="font-size:12px;font-weight:800;color:#6d28d9;" id="ret-bill-title">Original Tax Invoice</span>
-                  <span id="ret-bill-supply-badge" style="font-size:10px;padding:2px 8px;border-radius:12px;font-weight:700;background:#ede9fe;color:#5b21b6;">Intra-State (Delhi)</span>
+                  <div style="display:flex;align-items:center;gap:8px;">
+                    <span id="ret-bill-supply-badge" style="font-size:10px;padding:2px 8px;border-radius:12px;font-weight:700;background:#ede9fe;color:#5b21b6;">Intra-State (Delhi)</span>
+                    <button type="button" onclick="clearSalesReturnForm()" style="background:#fee2e2;color:#b91c1c;border:1px solid #fca5a5;border-radius:6px;cursor:pointer;font-size:11px;font-weight:700;padding:2px 8px;display:inline-flex;align-items:center;gap:3px;" title="Clear fetched bill">✕ Clear</button>
+                  </div>
                 </div>
                 <div id="ret-bill-details" style="font-size:12px;line-height:1.5;color:#334155;"></div>
               </div>
@@ -1553,7 +1558,11 @@ tr:hover td{background:#FAFAFA;}
               <div class="card-title" style="display:flex;align-items:center;gap:8px;">
                 <span>📋</span> <span>Credit Notes History</span>
               </div>
-              <button onclick="loadSalesReturnsHistory()" class="btn btn-outline" style="font-size:11px;padding:4px 8px;">🔄 Refresh</button>
+              <div style="display:flex;gap:6px;">
+                <button onclick="window.location.href='/api/sales/returns/export/excel'; toast('📊 Downloading Credit Notes Excel...');" class="btn btn-outline" style="font-size:11px;padding:4px 8px;color:#16a34a;border-color:#86efac;" title="Download Credit Notes Ledger as Excel">📊 Excel</button>
+                <button onclick="exportSalesReturnsCSV()" class="btn btn-outline" style="font-size:11px;padding:4px 8px;color:#dc2626;border-color:#fca5a5;" title="Download Credit Notes Ledger as CSV">📥 CSV</button>
+                <button onclick="loadSalesReturnsHistory()" class="btn btn-outline" style="font-size:11px;padding:4px 8px;">🔄 Refresh</button>
+              </div>
             </div>
             <div id="salesReturnsHistDiv" style="max-height:560px;overflow-y:auto;padding:12px;">
               <div class="empty-state"><div class="empty-icon">↩️</div><div class="empty-text">No credit notes issued yet</div></div>
@@ -1576,9 +1585,12 @@ tr:hover td{background:#FAFAFA;}
               <div class="form-group">
                 <label style="font-weight:700;font-size:13px;">Original Purchase Ref / Invoice No *</label>
                 <div style="display:flex;gap:8px;">
-                  <input type="text" id="pret-invref" placeholder="e.g. SKF-INV-9901 or P260424..." style="flex:1;border-radius:8px;">
-                  <button onclick="fetchPurchaseReturnInv()" style="padding:9px 16px;background:#0284c7;color:white;border:none;border-radius:8px;cursor:pointer;font-weight:700;font-size:12px;display:inline-flex;align-items:center;gap:4px;">
+                  <input type="text" id="pret-invref" placeholder="e.g. SKF-INV-9901 or P260424..." style="flex:1;border-radius:8px;" onkeydown="if(event.key==='Enter'){event.preventDefault();fetchPurchaseReturnInv();}">
+                  <button type="button" onclick="fetchPurchaseReturnInv()" style="padding:9px 16px;background:#0284c7;color:white;border:none;border-radius:8px;cursor:pointer;font-weight:700;font-size:12px;display:inline-flex;align-items:center;gap:4px;">
                     🔍 Fetch Purchase
+                  </button>
+                  <button type="button" onclick="clearPurchaseReturnForm()" style="padding:9px 14px;background:#f1f5f9;color:#475569;border:1.5px solid #cbd5e1;border-radius:8px;cursor:pointer;font-weight:600;font-size:12px;display:inline-flex;align-items:center;gap:4px;" title="Clear fetched purchase & reset form">
+                    ✕ Clear
                   </button>
                 </div>
               </div>
@@ -1587,7 +1599,10 @@ tr:hover td{background:#FAFAFA;}
               <div id="pret-bill-info" style="display:none;background:#f0f9ff;border:1.5px solid #bae6fd;border-radius:10px;padding:12px;margin-bottom:14px;">
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
                   <span style="font-size:12px;font-weight:800;color:#0284c7;" id="pret-bill-title">Original Purchase Invoice</span>
-                  <span id="pret-bill-supply-badge" style="font-size:10px;padding:2px 8px;border-radius:12px;font-weight:700;background:#e0f2fe;color:#0369a1;">Supplier Context</span>
+                  <div style="display:flex;align-items:center;gap:8px;">
+                    <span id="pret-bill-supply-badge" style="font-size:10px;padding:2px 8px;border-radius:12px;font-weight:700;background:#e0f2fe;color:#0369a1;">Supplier Context</span>
+                    <button type="button" onclick="clearPurchaseReturnForm()" style="background:#fee2e2;color:#b91c1c;border:1px solid #fca5a5;border-radius:6px;cursor:pointer;font-size:11px;font-weight:700;padding:2px 8px;display:inline-flex;align-items:center;gap:3px;" title="Clear fetched purchase">✕ Clear</button>
+                  </div>
                 </div>
                 <div id="pret-bill-details" style="font-size:12px;line-height:1.5;color:#334155;"></div>
               </div>
@@ -1646,7 +1661,11 @@ tr:hover td{background:#FAFAFA;}
               <div class="card-title" style="display:flex;align-items:center;gap:8px;color:#0369a1;">
                 <span>📋</span> <span>Debit Notes History</span>
               </div>
-              <button onclick="loadPurchaseReturnsHistory()" class="btn btn-outline" style="font-size:11px;padding:4px 8px;">🔄 Refresh</button>
+              <div style="display:flex;gap:6px;">
+                <button onclick="window.location.href='/api/purchases/returns/export/excel'; toast('📊 Downloading Debit Notes Excel...');" class="btn btn-outline" style="font-size:11px;padding:4px 8px;color:#16a34a;border-color:#86efac;" title="Download Debit Notes Ledger as Excel">📊 Excel</button>
+                <button onclick="exportPurchaseReturnsCSV()" class="btn btn-outline" style="font-size:11px;padding:4px 8px;color:#0369a1;border-color:#bae6fd;" title="Download Debit Notes Ledger as CSV">📥 CSV</button>
+                <button onclick="loadPurchaseReturnsHistory()" class="btn btn-outline" style="font-size:11px;padding:4px 8px;">🔄 Refresh</button>
+              </div>
             </div>
             <div id="purchaseReturnsHistDiv" style="max-height:560px;overflow-y:auto;padding:12px;">
               <div class="empty-state"><div class="empty-icon">📤</div><div class="empty-text">No debit notes issued yet</div></div>
@@ -2056,18 +2075,41 @@ tr:hover td{background:#FAFAFA;}
         </details>
 
         <details style="border:1.5px solid #bbf7d0;border-radius:10px;overflow:hidden;">
-          <summary style="padding:12px 16px;background:#f0fdf4;cursor:pointer;font-weight:700;font-size:13px;color:#16a34a;">📦 Purchase Entry — Record Purchases</summary>
+          <summary style="padding:12px 16px;background:#f0fdf4;cursor:pointer;font-weight:700;font-size:13px;color:#16a34a;">📦 Purchase Entry & AI Bill Scanner — Record Purchases</summary>
           <div style="padding:14px 16px;font-size:13px;line-height:1.9;color:#374151;">
             <b>Manual Entry:</b><br>
             Fill Supplier name, invoice no, date → add items → Save Purchase<br><br>
-            <b>AI Bill Scanner (Recommended!):</b><br>
-            <b>Step 1:</b> Save Gemini API key in Settings<br>
-            <b>Step 2:</b> Go to Purchases page → click <b>Upload Bill</b> button<br>
-            <b>Step 3:</b> Upload a photo of the purchase bill<br>
-            <b>Step 4:</b> AI will auto-fill all details — supplier, items, HSN, GST everything!<br>
-            <b>Step 5:</b> Verify and click <b>Save Purchase</b><br><br>
-            <div style="background:#f0fdf4;border-radius:6px;padding:8px;font-size:12px;">
-              💡 Supplier is automatically saved with address, phone, email
+            <b>AI Bill Scanner (High-Speed Cloud AI Included!):</b><br>
+            <b>Step 1:</b> Purchases page par jakar <b>📷 Camera Scan</b> ya <b>📄 Upload PDF / Gallery</b> par click karein<br>
+            <b>Step 2:</b> Photo ya PDF bill upload karein<br>
+            <b>Step 3:</b> AI turant sabhi details auto-fill karega — Supplier, GSTIN, Invoice No, Items, HSN, Qty, Rate & Taxes!<br>
+            <b>Step 4:</b> Verify karein aur <b>Save Purchase</b> dabayein — aapka shop stock automatically badh jayega!<br><br>
+            <div style="background:#f0fdf4;border-radius:8px;padding:10px;font-size:12px;margin-bottom:8px;border:1px solid #bbf7d0;line-height:1.6;">
+              🛡️ <b>Smart Purchase Duplicate Protection (Zero Double-Stock Risk):</b><br>
+              • <b>Accidental Re-save Hard Block:</b> Agar wahi purchase bill galti se dobara scan ya save kiya jaye, to BillZen use turant block kar dega! Na duplicate stock badhega, na galat Input Tax Credit (ITC) add hoga.<br>
+              • <b>Genuine Part-Bills Supported:</b> Agar ek hi supplier se same invoice number ke 2 genuine alag part-bills ya alag items aate hain, to BillZen unhe safely allow karta hai.<br>
+              • <b>OCR Variation Tolerance:</b> Dobara scan karne par agar rate ya quantity mein minor OCR scan variation ho, tab bhi duplicate pehchaan kar dukan ka stock aur accounting safe rakhta hai.<br>
+              • <b>Zero Waste:</b> Duplicate attempt par database, stock aur GST mein 0% change hota hai.
+            </div>
+            <div style="background:#f8fafc;border-radius:6px;padding:8px;font-size:12px;">
+              💡 Supplier profile automatically GSTIN, phone aur email ke saath directory mein save ho jati hai.
+            </div>
+          </div>
+        </details>
+
+        <details style="border:1.5px solid #fed7aa;border-radius:10px;overflow:hidden;">
+          <summary style="padding:12px 16px;background:#fff7ed;cursor:pointer;font-weight:700;font-size:13px;color:#c2410c;">🔄 Returns & Credit / Debit Notes — Stock & Ledger Auto-Sync</summary>
+          <div style="padding:14px 16px;font-size:13px;line-height:1.9;color:#374151;">
+            <b>Sales Return (Credit Note — Bikri Vapasi):</b><br>
+            • Customer maal wapas kare to Sales History ya Returns page se <b>Credit Note</b> banayein.<br>
+            • Wapas aaya maal automatically shop inventory stock mein add ho jata hai.<br>
+            • Customer ka khata balance kam hota hai aur Output GST liability automatically reverse ho jati hai.<br><br>
+            <b>Purchase Return (Debit Note — Kharid Vapasi):</b><br>
+            • Supplier ko defective ya excess maal wapas bhejne par <b>Debit Note</b> banayein.<br>
+            • Maal ka stock automatically minus hota hai (negative stock prevention ke saath).<br>
+            • Supplier balance aur Input Tax Credit (ITC) real-time adjust hota hai.<br><br>
+            <div style="background:#fff7ed;border-radius:6px;padding:8px;font-size:12px;border:1px solid #fed7aa;">
+              💡 <b>100% Mathematically Synced:</b> Returns banate hi Inventory stock, Customer/Supplier Khata aur GST balance real-time update ho jate hain.
             </div>
           </div>
         </details>
@@ -2087,43 +2129,44 @@ tr:hover td{background:#FAFAFA;}
         </details>
 
         <details style="border:1.5px solid #bae6fd;border-radius:10px;overflow:hidden;">
-          <summary style="padding:12px 16px;background:#f0f9ff;cursor:pointer;font-weight:700;font-size:13px;color:#0369a1;">👥 Customers — Ledger & Payments</summary>
+          <summary style="padding:12px 16px;background:#f0f9ff;cursor:pointer;font-weight:700;font-size:13px;color:#0369a1;">👥 Customers & Suppliers — Ledger & Payments</summary>
           <div style="padding:14px 16px;font-size:13px;line-height:1.9;color:#374151;">
-            <b>Customer Ledger:</b> Customers page → 📒 Ledger button → complete customer history<br><br>
+            <b>Customer Ledger:</b> Customers page → 📒 Ledger button → complete customer statement & bill history<br><br>
             <b>Payment Record:</b> In Ledger → enter Amount → Record Payment → adjusted against oldest bills<br><br>
-            <b>Mark Paid:</b> Mark a specific bill as paid<br><br>
-            <b>WA Reminder:</b> Send WhatsApp payment reminder to customer for pending dues<br><br>
+            <b>WA Payment Link:</b> Customer ko 1-tap UPI link ke saath WhatsApp reminder bhejein<br><br>
+            <b>Supplier Bills & Ledger:</b> Purchases page → Supplier ke aage Bills click karein → View history, delete, ya <b>Excel download</b> karein<br><br>
             <div style="background:#f0f9ff;border-radius:6px;padding:8px;font-size:12px;">
-              💡 Save Customer GSTIN — GST Report will automatically split B2B
+              💡 Save Customer GSTIN — GST Report will automatically split B2B vs B2C
             </div>
           </div>
         </details>
 
         <details style="border:1.5px solid #fca5a5;border-radius:10px;overflow:hidden;">
-          <summary style="padding:12px 16px;background:#fff1f2;cursor:pointer;font-weight:700;font-size:13px;color:#dc2626;">📈 Reports & GST Filing</summary>
+          <summary style="padding:12px 16px;background:#fff1f2;cursor:pointer;font-weight:700;font-size:13px;color:#dc2626;">📈 Reports, GST Filing & CA Tally Export</summary>
           <div style="padding:14px 16px;font-size:13px;line-height:1.9;color:#374151;">
-            <b>Reports:</b> Total Sales, Purchase, Profit, Pending — all in one place<br><br>
-            <b>GST Report:</b><br>
-            → Select Month → GSTR-1 and GSTR-2 ready<br>
-            → <b>Export CSV</b> → Send to CA<br>
-            → <b>GSTR-1 JSON</b> → GST Portal pe directly upload do<br><br>
-            <b>Tally Export:</b> Reports → 🏦 Tally XML → Send to CA → Import into Tally<br><br>
-            <b>AI Dashboard:</b> Revenue forecast, stock intelligence, customer VIP tags<br><br>
-            <div style="background:#fff1f2;border-radius:6px;padding:8px;font-size:12px;">
-              💡 GST Portal: services.gst.gov.in → Login → Returns → GSTR-1 → Upload JSON
+            <b>Real-time Business Reports:</b> Total Sales, Purchases, Net Profit, Pending Dues — sab ek jagah.<br><br>
+            <b>GST Reports & Filing:</b><br>
+            → Month select karein → GSTR-1 & GSTR-2 ready<br>
+            → <b>GSTR-1 JSON:</b> Download karke GST Portal pe direct upload karein<br>
+            → <b>CA-Audit Multi-Sheet Excel:</b> Sales Register, Purchase Register, Stock Valuation, Customer Ledger aur GST Summary ek hi Excel workbook mein (plus dedicated Credit/Debit Note Excel registers)!<br><br>
+            <b>Tally Prime 1-Click Export (Strict Pakka Only):</b><br>
+            → Reports → 🏦 <b>Tally XML</b> export karein → CA apne Tally Prime mein 5 second mein import kar lega.<br>
+            → Kacha bills zero-risk ke liye automatically filter out ho jaate hain.<br><br>
+            <div style="background:#fef2f2;border-radius:8px;padding:10px;font-size:12px;border:1px solid #fecaca;line-height:1.6;">
+              ⚖️ <b>GST Rule 46 & Section 170 Rounding (₹0.01 Explanation):</b><br>
+              Indian GST Rules (CGST Rule 46) ke tehat tax har line-item par alag calculate hokar standard 2 decimal places tak round hota hai. Sabhi items ke rounded taxes ka sum, bill subtotal ke bulk tax percentage se kabhi-kabhi <b>₹0.01</b> aage-peeche ho sakta hai. Ye 100% legal, statutory compliant aur natural standard rounding hai (CGST Act Section 170). Tally Prime aur GST Portal dono ise standard accounting practice ke roop mein accept karte hain.
             </div>
           </div>
         </details>
 
         <details style="border:1.5px solid #d1d5db;border-radius:10px;overflow:hidden;">
-          <summary style="padding:12px 16px;background:#f9fafb;cursor:pointer;font-weight:700;font-size:13px;color:#374151;">⚙️ Settings — First Time Setup — Must Do</summary>
+          <summary style="padding:12px 16px;background:#f9fafb;cursor:pointer;font-weight:700;font-size:13px;color:#374151;">⚙️ Settings & Security — First Time Setup</summary>
           <div style="padding:14px 16px;font-size:13px;line-height:1.9;color:#374151;">
             <b>Shop Details:</b> Name, Address, Phone, Email, GSTIN, State → Save Settings<br><br>
-            <b>Logo:</b> Upload Logo → will appear on invoice<br>
-            <b>Signature:</b> Upload Signature → will appear on invoice<br><br>
-            <b>Bank/UPI:</b> Bank name, A/c No, IFSC, UPI ID → payment details appear in WA message<br><br>
-            <b>AI Bill Scanner:</b> Add Gemini API Key (free at aistudio.google.com/apikey) → to scan purchase bills<br><br>
-            <b>Staff:</b> Left menu → Staff → Add staff member → Set role: Cashier/Staff/Manager<br><br>
+            <b>Logo & Signature:</b> Upload Logo & Signature → will appear on tax invoice & WhatsApp receipts<br><br>
+            <b>Bank/UPI:</b> Bank name, A/c No, IFSC, UPI ID → dynamic tap-to-pay links & QR code ready<br><br>
+            <b>Smart Cloud AI:</b> Platform Cloud AI pre-activated hai (Custom enterprise key optional hai)<br><br>
+            <b>Staff Management:</b> Left menu → Staff → Add Cashier / Staff / Manager with strict permission security (Staff cannot tamper with bank, settings, AI keys or backup!)<br><br>
             <div style="background:#f9fafb;border-radius:6px;padding:8px;font-size:12px;">
               💡 Backup: Dashboard → ⬇️ Backup → download JSON file<br>
               💡 Cloud: Dashboard → ☁️ Drive → save to Google Drive
@@ -2400,6 +2443,223 @@ tr:hover td{background:#FAFAFA;}
   </div>
 </div>
 
+<!-- Master Client Details Modal (Master Admin Only) -->
+<div class="modal-overlay" id="masterClientDetailsModal">
+  <div class="modal" style="max-width:680px;max-height:90vh;display:flex;flex-direction:column;">
+    <div class="modal-header" style="background:#fcfaff;border-bottom:1.5px solid var(--border);">
+      <div class="modal-title" style="display:flex;align-items:center;gap:8px;">
+        <span style="font-size:20px;">🏪</span>
+        <div>
+          <span id="mcd-header-shopname" style="font-size:16px;font-weight:800;color:#1e1b4b;">Client Shop Details</span>
+          <span id="mcd-header-badge" style="margin-left:8px;font-size:11px;padding:3px 9px;border-radius:12px;font-weight:700;">Active</span>
+        </div>
+      </div>
+      <span class="modal-close" onclick="closeModal('masterClientDetailsModal')">✕</span>
+    </div>
+
+    <div class="modal-body" style="overflow-y:auto;padding:16px 20px;flex:1;">
+      <!-- VIEW MODE -->
+      <div id="mcd-view-container">
+        <!-- Credentials & Security Card -->
+        <div style="background:#f5f3ff;border:1.5px solid #ddd6fe;border-radius:10px;padding:14px;margin-bottom:14px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+            <div style="font-size:12px;font-weight:800;color:#6d28d9;display:flex;align-items:center;gap:6px;">
+              <span>🔐</span> <span>Login Credentials &amp; Access</span>
+            </div>
+            <button type="button" onclick="toggleMcdResetBox()" class="btn btn-sm" style="background:#ede9fe;color:#6d28d9;border:1px solid #c4b5fd;font-size:11px;padding:3px 8px;font-weight:700;">
+              🔑 Reset Password
+            </button>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;font-size:12px;">
+            <div>
+              <span style="color:var(--gray);font-size:11px;">Username (Login ID):</span><br>
+              <b id="mcd-val-username" style="font-size:13px;color:#1e293b;">@username</b>
+            </div>
+            <div>
+              <span style="color:var(--gray);font-size:11px;">Password:</span><br>
+              <div style="display:flex;align-items:center;gap:6px;margin-top:4px;">
+                <span style="font-family:monospace;letter-spacing:2px;font-size:13px;color:#334155;background:#fff;padding:3px 10px;border-radius:6px;border:1px solid #cbd5e1;">••••••••</span>
+                <span style="font-size:11px;font-weight:600;color:#059669;background:#dcfce7;padding:2px 8px;border-radius:10px;">🔒 Hashed</span>
+              </div>
+              <div id="mcd-pwd-hint" style="font-size:10px;color:var(--gray);margin-top:4px;">Stored securely as cryptographic hash. Plaintext is never stored. Use Reset Password to set a new password.</div>
+            </div>
+          </div>
+
+          <!-- Inline Reset Password Box (hidden by default) -->
+          <div id="mcd-reset-box" style="display:none;margin-top:12px;padding-top:12px;border-top:1px dashed #c4b5fd;">
+            <div style="font-size:11px;font-weight:700;color:#6d28d9;margin-bottom:6px;">Set New Password for Client:</div>
+            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+              <input type="text" id="mcd-new-pwd" placeholder="Enter new password (min 4 chars)" style="flex:1;min-width:160px;padding:6px 10px;border:1.5px solid #a78bfa;border-radius:6px;font-size:12px;">
+              <button type="button" onclick="generateRandomMcdPassword()" class="btn btn-sm btn-outline" style="font-size:11px;padding:6px 10px;" title="Generate Random Password">🎲 Random</button>
+              <button type="button" onclick="confirmResetMcdPassword()" class="btn btn-sm btn-primary" style="background:#7c3aed;font-size:11px;padding:6px 12px;font-weight:700;">Confirm Reset</button>
+              <button type="button" onclick="toggleMcdResetBox(false)" class="btn btn-sm btn-outline" style="font-size:11px;padding:6px 8px;">✕</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Subscription Management Box -->
+        <div style="background:#f8fafc;border:1.5px solid #e2e8f0;border-radius:10px;padding:14px;margin-bottom:14px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+            <div style="font-size:12px;font-weight:800;color:#1e1b4b;display:flex;align-items:center;gap:6px;">
+              <span>⏳</span> <span>Subscription &amp; Validity</span>
+            </div>
+            <div id="mcd-sub-status-badge"></div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;font-size:12px;margin-bottom:12px;">
+            <div>
+              <span style="color:var(--gray);font-size:11px;">Current Plan:</span><br>
+              <b id="mcd-val-planlabel" style="color:#1e293b;">7-Day Free Trial</b>
+            </div>
+            <div>
+              <span style="color:var(--gray);font-size:11px;">Expires / Valid Till:</span><br>
+              <b id="mcd-val-expiresat" style="color:#1e293b;">2026-10-19</b>
+            </div>
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding-top:10px;border-top:1px solid #e2e8f0;">
+            <span style="font-size:11px;font-weight:700;color:var(--gray);">Plan Actions:</span>
+            <button type="button" id="btnMcdToggleStatus" onclick="mcdToggleStatusAction()" style="padding:5px 12px;font-size:11px;font-weight:700;border-radius:6px;cursor:pointer;">
+              ⛔ Stop Subscription
+            </button>
+            <button type="button" onclick="mcdExtendPlanAction(30)" class="btn btn-sm" style="padding:5px 10px;background:#f3f0ff;color:#7c3aed;border:1px solid #c4b5fd;border-radius:6px;font-size:11px;font-weight:700;">+30 Days</button>
+            <button type="button" onclick="mcdExtendPlanAction(365)" class="btn btn-sm" style="padding:5px 10px;background:#f0fdf4;color:#16a34a;border:1px solid #bbf7d0;border-radius:6px;font-size:11px;font-weight:700;">+1 Year</button>
+            <button type="button" onclick="mcdExtendPlanAction('lifetime')" class="btn btn-sm" style="padding:5px 10px;background:#fef3c7;color:#b45309;border:1px solid #fde68a;border-radius:6px;font-size:11px;font-weight:700;">👑 Lifetime Access</button>
+          </div>
+        </div>
+
+        <!-- Business & Contact Information Card -->
+        <div style="background:#ffffff;border:1.5px solid #e2e8f0;border-radius:10px;padding:14px;margin-bottom:14px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+            <div style="font-size:12px;font-weight:800;color:#1e1b4b;display:flex;align-items:center;gap:6px;">
+              <span>🏢</span> <span>Business &amp; Contact Details</span>
+            </div>
+            <button type="button" onclick="switchToMcdEditMode()" class="btn btn-sm btn-outline" style="font-size:11px;padding:3px 10px;color:#7c3aed;border-color:#ddd6fe;font-weight:700;">
+              ✏️ Edit Details
+            </button>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;font-size:12px;">
+            <div>
+              <span style="color:var(--gray);font-size:11px;">Shop Name:</span><br>
+              <b id="mcd-val-shopname" style="color:#1e293b;">-</b>
+            </div>
+            <div>
+              <span style="color:var(--gray);font-size:11px;">Owner Name:</span><br>
+              <b id="mcd-val-ownername" style="color:#1e293b;">-</b>
+            </div>
+            <div>
+              <span style="color:var(--gray);font-size:11px;">Mobile / Phone:</span><br>
+              <div style="display:flex;align-items:center;gap:6px;margin-top:2px;">
+                <b id="mcd-val-phone" style="color:#1e293b;">-</b>
+                <span id="mcd-val-wa-link"></span>
+              </div>
+            </div>
+            <div>
+              <span style="color:var(--gray);font-size:11px;">GSTIN:</span><br>
+              <b id="mcd-val-gstin" style="color:#1e293b;">Unregistered</b>
+            </div>
+            <div>
+              <span style="color:var(--gray);font-size:11px;">State / POS:</span><br>
+              <span id="mcd-val-state" style="color:#1e293b;font-weight:600;">-</span>
+            </div>
+            <div>
+              <span style="color:var(--gray);font-size:11px;">Registered On:</span><br>
+              <span id="mcd-val-createdat" style="color:#1e293b;">-</span>
+            </div>
+            <div style="grid-column:1 / -1;">
+              <span style="color:var(--gray);font-size:11px;">Address:</span><br>
+              <span id="mcd-val-address" style="color:#1e293b;">Not specified</span>
+            </div>
+            <div style="grid-column:1 / -1;">
+              <span style="color:var(--gray);font-size:11px;">Email:</span><br>
+              <span id="mcd-val-email" style="color:#1e293b;">-</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Activity & Usage Card -->
+        <div style="background:#f8fafc;border:1.5px solid #e2e8f0;border-radius:10px;padding:12px 14px;">
+          <div style="font-size:12px;font-weight:800;color:#1e1b4b;margin-bottom:8px;display:flex;align-items:center;gap:6px;">
+            <span>📊</span> <span>Billing Activity Summary</span>
+          </div>
+          <div style="display:flex;gap:24px;font-size:12px;">
+            <div>
+              <span style="color:var(--gray);font-size:11px;">Total Invoices:</span><br>
+              <b id="mcd-val-billcnt" style="font-size:14px;color:#1e293b;">0 bills</b>
+            </div>
+            <div>
+              <span style="color:var(--gray);font-size:11px;">Total Billed Revenue:</span><br>
+              <b id="mcd-val-revenue" style="font-size:14px;color:#15803d;">₹0.00</b>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- EDIT MODE CONTAINER (Hidden by default) -->
+      <div id="mcd-edit-container" style="display:none;">
+        <div style="background:#eff6ff;border:1.5px solid #bfdbfe;border-radius:10px;padding:10px 14px;margin-bottom:14px;font-size:12px;color:#1d4ed8;">
+          ✏️ <b>Edit Client Shop Details:</b> Update owner name, shop name, phone, GSTIN, state or address.
+        </div>
+        <input type="hidden" id="mcd-edit-userid">
+        <div class="form-grid">
+          <div class="form-group form-full">
+            <label style="font-weight:700;font-size:12px;">Shop / Business Name *</label>
+            <input type="text" id="mcd-edit-shopname" placeholder="Shop Name">
+          </div>
+          <div class="form-group">
+            <label style="font-weight:700;font-size:12px;">Owner / Contact Name *</label>
+            <input type="text" id="mcd-edit-ownername" placeholder="Owner Name">
+          </div>
+          <div class="form-group">
+            <label style="font-weight:700;font-size:12px;">Mobile Number</label>
+            <input type="tel" id="mcd-edit-phone" placeholder="Phone Number">
+          </div>
+          <div class="form-group">
+            <label style="font-weight:700;font-size:12px;">GSTIN (Optional)</label>
+            <input type="text" id="mcd-edit-gstin" placeholder="15-digit GSTIN" maxlength="15">
+          </div>
+          <div class="form-group">
+            <label style="font-weight:700;font-size:12px;">State / Region</label>
+            <select id="mcd-edit-state">
+              <option value="DELHI">DELHI (07)</option>
+              <option value="HARYANA">HARYANA (06)</option>
+              <option value="UTTAR PRADESH">UTTAR PRADESH (09)</option>
+              <option value="RAJASTHAN">RAJASTHAN (08)</option>
+              <option value="PUNJAB">PUNJAB (03)</option>
+              <option value="MAHARASHTRA">MAHARASHTRA (27)</option>
+              <option value="GUJARAT">GUJARAT (24)</option>
+              <option value="MADHYA PRADESH">MADHYA PRADESH (23)</option>
+              <option value="BIHAR">BIHAR (10)</option>
+              <option value="WEST BENGAL">WEST BENGAL (19)</option>
+            </select>
+          </div>
+          <div class="form-group form-full">
+            <label style="font-weight:700;font-size:12px;">Business Address</label>
+            <input type="text" id="mcd-edit-address" placeholder="Shop Address">
+          </div>
+          <div class="form-group form-full">
+            <label style="font-weight:700;font-size:12px;">Email Address</label>
+            <input type="email" id="mcd-edit-email" placeholder="owner@example.com">
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-footer" style="background:#fcfaff;border-top:1.5px solid var(--border);display:flex;justify-content:space-between;align-items:center;">
+      <div id="mcd-footer-left">
+        <button type="button" id="btnMcdSwitchEdit" onclick="switchToMcdEditMode()" class="btn btn-outline" style="font-size:12px;color:#7c3aed;border-color:#ddd6fe;font-weight:700;">
+          ✏️ Edit Details
+        </button>
+      </div>
+      <div style="display:flex;gap:8px;">
+        <button type="button" class="btn btn-outline" onclick="closeModal('masterClientDetailsModal')">Close</button>
+        <button type="button" id="btnMcdCancelEdit" onclick="switchToMcdViewMode()" class="btn btn-outline" style="display:none;">Cancel Edit</button>
+        <button type="button" id="btnMcdSaveEdit" onclick="saveMasterClientEdit()" class="btn btn-primary" style="display:none;background:#7c3aed;font-weight:700;">
+          💾 Save Changes
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- Product Modal -->
 <div class="modal-overlay" id="productModal">
   <div class="modal">
@@ -2481,10 +2741,9 @@ tr:hover td{background:#FAFAFA;}
             <span style="font-size:13px;color:var(--gray);">📱</span>
             <span id="ledgerCustPhone" style="font-size:13px;color:var(--dark);font-weight:500;"></span>
           </div>
-          <div style="display:flex;gap:8px;">
             <button id="ledgerWABtn" onclick="sendLedgerWA()" style="padding:7px 14px;background:#25D366;color:white;border:none;border-radius:20px;cursor:pointer;font-size:12px;font-weight:600;display:flex;align-items:center;gap:5px;">📲 Send Reminder</button>
-            <button onclick="exportLedgerCSV()" style="padding:7px 14px;background:#22c55e;color:white;border:none;border-radius:20px;cursor:pointer;font-size:12px;font-weight:600;display:flex;align-items:center;gap:5px;">📊 Excel</button>
-          </div>
+            <button onclick="exportCustomerLedgerExcel()" style="padding:7px 14px;background:#16a34a;color:white;border:none;border-radius:20px;cursor:pointer;font-size:12px;font-weight:600;display:flex;align-items:center;gap:5px;" title="Export Ledger Statement to Excel">📊 Excel</button>
+            <button onclick="exportLedgerCSV()" style="padding:7px 14px;background:#475569;color:white;border:none;border-radius:20px;cursor:pointer;font-size:12px;font-weight:600;display:flex;align-items:center;gap:5px;" title="Export Ledger Statement to CSV">📄 CSV</button>
         </div>
       </div>
       <span class="modal-close" onclick="closeModal('ledgerModal')" style="margin-left:12px;">✕</span>
@@ -2586,7 +2845,6 @@ tr:hover td{background:#FAFAFA;}
         <div class="form-group"><label>Customer Name *</label><input type="text" id="eb-cname" placeholder="Customer name"></div>
         <div class="form-group"><label>Mobile Number</label><input type="tel" id="eb-phone" placeholder="Phone number"></div>
         <div class="form-group"><label>Customer GSTIN</label><input type="text" id="eb-gstin" placeholder="GSTIN (optional)" onchange="if(this.value.length>=2){const sc=this.value.slice(0,2);const sel=document.getElementById('eb-state');if(sel)sel.value=sc;handleEbStateChange();}"></div>
-        <div class="form-group"><label>Khata Pen Number</label><input type="text" id="eb-khata-pen" placeholder="e.g. 104/A or Khata Ref"></div>
         <div class="form-group"><label>Bill Date</label><input type="date" id="eb-date"></div>
         <div class="form-group"><label>State / Place of Supply</label>
           <select id="eb-state" onchange="handleEbStateChange()" style="padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;outline:none;font-family:inherit;">
@@ -2658,7 +2916,7 @@ tr:hover td{background:#FAFAFA;}
           <option value="retail">📄 Retail Tax Invoice (A4)</option>
           <option value="wholesale">🏭 Wholesale Invoice (B2B)</option>
           <option value="thermal">🧾 Thermal Slip (80mm)</option>
-          <option value="excel">📊 Single Bill Excel (.csv)</option>
+          <option value="excel">📊 Single Bill Excel (.xlsx)</option>
         </select>
 
         <!-- WhatsApp Button -->
@@ -2737,9 +2995,10 @@ tr:hover td{background:#FAFAFA;}
         <div class="modal-title" id="pvTitle">Purchase Details</div>
         <div id="pvSubtitle" style="font-size:12px;color:var(--gray);margin-top:3px;"></div>
       </div>
-      <div style="display:flex;gap:8px;align-items:center;">
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
         <button id="pvWABtn" style="padding:6px 12px;background:#25D366;color:white;border:none;border-radius:8px;cursor:pointer;font-size:12px;font-weight:600;display:none;">📲 WA Order</button>
-        <button id="pvCSVBtn" style="padding:6px 12px;background:#22c55e;color:white;border:none;border-radius:8px;cursor:pointer;font-size:12px;font-weight:600;">📊 CSV</button>
+        <button id="pvExcelBtn" style="padding:6px 12px;background:#16a34a;color:white;border:none;border-radius:8px;cursor:pointer;font-size:12px;font-weight:600;" title="Export Purchase Bill to Excel">📊 Excel</button>
+        <button id="pvCSVBtn" style="padding:6px 12px;background:#475569;color:white;border:none;border-radius:8px;cursor:pointer;font-size:12px;font-weight:600;" title="Export Purchase Bill to CSV">📄 CSV</button>
         <button onclick="if(_currentPurchaseData)initiateReturnFromPurchase()" style="padding:6px 12px;background:#fee2e2;color:#dc2626;border:1.5px solid #fca5a5;border-radius:8px;cursor:pointer;font-size:12px;font-weight:700;display:inline-flex;align-items:center;gap:4px;" title="Create Purchase Return / Debit Note">
           📤 Return
         </button>
@@ -2822,7 +3081,8 @@ tr:hover td{background:#FAFAFA;}
         <div id="sbSubtitle" style="font-size:12px;color:var(--gray);margin-top:3px;"></div>
       </div>
       <div style="display:flex;gap:8px;align-items:center;">
-        <button onclick="exportSupplierCSV()" style="padding:6px 12px;background:#22c55e;color:white;border:none;border-radius:8px;cursor:pointer;font-size:12px;font-weight:600;">📊 Export CSV</button>
+        <button onclick="exportSupplierExcel()" style="padding:6px 12px;background:#16a34a;color:white;border:none;border-radius:8px;cursor:pointer;font-size:12px;font-weight:600;">📊 Export Excel</button>
+        <button onclick="exportSupplierCSV()" style="padding:6px 12px;background:#475569;color:white;border:none;border-radius:8px;cursor:pointer;font-size:12px;font-weight:600;">📥 CSV</button>
         <span class="modal-close" onclick="closeModal('supplierBillsModal')">✕</span>
       </div>
     </div>
@@ -2863,7 +3123,7 @@ let saleRowCount = 0, purRowCount = 0;
 let allProducts = [], allCustomers = [], allSuppliers = [], allUnits = [];
 
 const ROLE_ALLOWED_PAGES = {
-  admin:   ['dashboard', 'sales', 'quotation', 'challan', 'purchases', 'products', 'customers', 'suppliers', 'stock-adjust', 'returns', 'reports', 'gst', 'ai', 'settings', 'staff', 'clients'],
+  admin:   ['dashboard', 'sales', 'quotation', 'challan', 'purchases', 'products', 'customers', 'suppliers', 'stock-adjust', 'returns', 'reports', 'gst', 'ai', 'settings', 'staff'],
   manager: ['dashboard', 'sales', 'quotation', 'challan', 'purchases', 'products', 'customers', 'suppliers', 'stock-adjust', 'returns', 'reports', 'gst', 'ai'],
   staff:   ['sales', 'quotation', 'challan', 'purchases', 'products', 'customers', 'suppliers', 'stock-adjust', 'returns'],
   cashier: ['sales', 'quotation', 'challan', 'customers']
@@ -3719,13 +3979,13 @@ async function loadDashboard() {
   const sr = await api('GET', '/api/sales');
   if(sr.ok && sr.data.sales?.length) {
     const recent = sr.data.sales.slice(0,5);
-    document.getElementById('recentSalesTable').innerHTML = `<table><tbody>${recent.map(s=>`<tr><td><b>${s.bill_id}</b><br><small>${s.customer_name}</small></td><td>${s.sale_date}</td><td><b>${fmt(s.total_amount)}</b></td><td><span class="badge badge-${s.payment_status==='Paid'?'success':s.payment_status==='Partial'?'warning':'danger'}">${s.payment_status}</span></td></tr>`).join('')}</tbody></table>`;
+    document.getElementById('recentSalesTable').innerHTML = `<table style="width:100%;border-collapse:collapse;table-layout:fixed;"><tbody>${recent.map(s=>`<tr><td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:7px 4px;font-size:12px;" title="${escapeHtml(s.customer_name||'')}"><b>${s.bill_id}</b><br><small style="color:var(--gray);">${escapeHtml(s.customer_name||'Walk-in')}</small></td><td style="width:78px;white-space:nowrap;font-size:11px;color:var(--gray);padding:7px 4px;">${s.sale_date}</td><td style="width:85px;white-space:nowrap;text-align:right;padding:7px 4px;"><b>${fmt(s.total_amount)}</b></td><td style="width:68px;text-align:right;white-space:nowrap;padding:7px 4px;"><span class="badge badge-${s.payment_status==='Paid'?'success':s.payment_status==='Partial'?'warning':'danger'}" style="font-size:10px;">${s.payment_status}</span></td></tr>`).join('')}</tbody></table>`;
   }
 
   // Low stock
   const low = allProducts.filter(p => p.stock <= p.low_stock);
   if(low.length) {
-    document.getElementById('lowStockTable').innerHTML = `<table><tbody>${low.slice(0,5).map(p=>`<tr><td><b>${p.name}</b></td><td><span style="color:var(--danger);font-weight:700;">${p.stock} ${p.unit}</span></td><td><small>Min: ${p.low_stock}</small></td></tr>`).join('')}</tbody></table>`;
+    document.getElementById('lowStockTable').innerHTML = `<table style="width:100%;border-collapse:collapse;table-layout:fixed;"><tbody>${low.slice(0,5).map(p=>`<tr><td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:8px 4px;font-size:12px;" title="${escapeHtml(p.name)}"><b>${escapeHtml(p.name)}</b></td><td style="width:75px;text-align:right;white-space:nowrap;padding:8px 6px;"><span style="color:var(--danger);font-weight:700;font-size:12px;">${p.stock} ${p.unit||'Pcs'}</span></td><td style="width:65px;text-align:right;white-space:nowrap;color:var(--gray);font-size:11px;padding:8px 4px 8px 2px;"><small style="font-weight:600;">Min: ${p.low_stock}</small></td></tr>`).join('')}</tbody></table>`;
   }
 }
 
@@ -5736,24 +5996,8 @@ function filterReportTable(q) {
 function exportReportMonth() {
   const now = new Date();
   const month = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
-  const monthSales = _allReportSales.filter(s => s.sale_date.startsWith(month));
-  let csv = `Sales Report - ${month}
-
-Bill ID,Customer,Date,Total,Paid,Pending,Status
-`;
-  monthSales.forEach(s => {
-    const p = Math.max(0, s.total_amount - s.paid_amount);
-    csv += `${s.bill_id},${s.customer_name},${s.sale_date},${s.total_amount},${s.paid_amount},${p},${s.payment_status}
-`;
-  });
-  const total = monthSales.reduce((a,s)=>a+s.total_amount,0);
-  csv += `
-Total,,,,${total}
-`;
-  const blob = new Blob([csv],{type:'text/csv'});
-  const a = document.createElement('a'); a.href=URL.createObjectURL(blob);
-  a.download=`Sales_${month}.csv`; a.click();
-  toast('📊 This month exported!');
+  window.location.href = `/api/reports/export/excel?month=${month}`;
+  toast('📊 Downloading 6-Sheet Financial Report for ' + month + '...');
 }
 
 // ═══════════════════════════════════════════════
@@ -7190,6 +7434,8 @@ async function exportSelectedTally() {
 
   const selectedSales = checkedBoxes.filter(c => c.dataset.type === 'Sales').map(c => c.dataset.id);
   const selectedPurchases = checkedBoxes.filter(c => c.dataset.type === 'Purchase').map(c => c.dataset.id);
+  const selectedCreditNotes = checkedBoxes.filter(c => c.dataset.type === 'Credit Note').map(c => c.dataset.id);
+  const selectedDebitNotes = checkedBoxes.filter(c => c.dataset.type === 'Debit Note').map(c => c.dataset.id);
 
   const vch_type = (incSales && incPurchase) ? 'both' : (incPurchase ? 'purchases' : 'sales');
 
@@ -7202,11 +7448,23 @@ async function exportSelectedTally() {
     "round_off": document.getElementById('tl-roundoff')?.value.trim() || "Short & Exces"
   };
 
+  if (!_csrfToken) {
+    try {
+      const csrf = await fetch('/api/csrf', {credentials:'include'});
+      const csrfData = await csrf.json();
+      _csrfToken = csrfData.csrf_token;
+    } catch(e) {}
+  }
+
   toast('⏳ Generating Tally Item Invoice XML (V2)...');
   try {
     const res = await fetch('/api/tally/export/v2', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRF-Token': _csrfToken || ''
+      },
       body: JSON.stringify({
         voucher_type: vch_type,
         category: category,
@@ -7214,6 +7472,8 @@ async function exportSelectedTally() {
         to_date: to_date,
         selected_sales: selectedSales,
         selected_purchases: selectedPurchases,
+        selected_credit_notes: selectedCreditNotes,
+        selected_debit_notes: selectedDebitNotes,
         ledger_map: ledger_map
       })
     });
@@ -7228,11 +7488,17 @@ async function exportSelectedTally() {
     const match = disposition.match(/filename="?([^"]+)"?/);
     if (match && match[1]) filename = match[1];
 
+    const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
+    a.style.display = 'none';
+    a.href = url;
     a.download = filename;
+    document.body.appendChild(a);
     a.click();
-    URL.revokeObjectURL(a.href);
+    setTimeout(() => {
+      if (a.parentNode) a.parentNode.removeChild(a);
+      window.URL.revokeObjectURL(url);
+    }, 2000);
     document.getElementById('tallyModal').style.display = 'none';
     toast('✅ Tally XML exported successfully! (Item Invoice with Sequential Vouchers & Rate-wise Ledgers)');
   } catch(e) {
@@ -7252,6 +7518,8 @@ async function syncLiveToTally() {
 
   const selectedSales = checkedBoxes.filter(c => c.dataset.type === 'Sales').map(c => c.dataset.id);
   const selectedPurchases = checkedBoxes.filter(c => c.dataset.type === 'Purchase').map(c => c.dataset.id);
+  const selectedCreditNotes = checkedBoxes.filter(c => c.dataset.type === 'Credit Note').map(c => c.dataset.id);
+  const selectedDebitNotes = checkedBoxes.filter(c => c.dataset.type === 'Debit Note').map(c => c.dataset.id);
   const vch_type = (incSales && incPurchase) ? 'both' : (incPurchase ? 'purchases' : 'sales');
 
   const ledger_map = {
@@ -7263,11 +7531,23 @@ async function syncLiveToTally() {
     "round_off": document.getElementById('tl-roundoff')?.value.trim() || "Short & Exces"
   };
 
+  if (!_csrfToken) {
+    try {
+      const csrf = await fetch('/api/csrf', {credentials:'include'});
+      const csrfData = await csrf.json();
+      _csrfToken = csrfData.csrf_token;
+    } catch(e) {}
+  }
+
   toast('⏳ Connecting to TallyPrime on port 9000...');
   try {
     const res = await fetch('/api/tally/sync/live', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRF-Token': _csrfToken || ''
+      },
       body: JSON.stringify({
         voucher_type: vch_type,
         category: category,
@@ -7275,6 +7555,8 @@ async function syncLiveToTally() {
         to_date: to_date,
         selected_sales: selectedSales,
         selected_purchases: selectedPurchases,
+        selected_credit_notes: selectedCreditNotes,
+        selected_debit_notes: selectedDebitNotes,
         ledger_map: ledger_map,
         tally_host: '127.0.0.1',
         tally_port: 9000
@@ -7644,6 +7926,9 @@ function openRenewalModal() {
   openModal('renewalModal');
 }
 
+let _masterShopsList = [];
+let _masterCurrentClient = null;
+
 async function loadMasterClients() {
   const div = document.getElementById('masterClientsListDiv');
   if (!div) return;
@@ -7654,6 +7939,7 @@ async function loadMasterClients() {
     return;
   }
   const shops = r.data.shops || [];
+  _masterShopsList = shops;
   const cntBadge = document.getElementById('masterClientsCount');
   if (cntBadge) cntBadge.textContent = `${shops.length} Total Registered Shops`;
 
@@ -7669,34 +7955,40 @@ async function loadMasterClients() {
         <th style="padding:10px 14px;">Contact / GSTIN</th>
         <th style="padding:10px 14px;">Plan Status</th>
         <th style="padding:10px 14px;">Activity</th>
-        <th style="padding:10px 14px;">Actions (Extend Plan)</th>
+        <th style="padding:10px 14px;">Actions (Extend / Manage)</th>
       </tr>
     </thead>
     <tbody>
       ${shops.map(s => {
         const p = s.plan_info || {};
+        const isSuspended = p.status === 'suspended' || s.plan_status === 'suspended';
         const isExp = p.status === 'expired';
         const isLife = p.status === 'lifetime';
         const isAct = p.status === 'active';
         const cleanPh = (s.shop_phone || '').replace(/[^0-9]/g, '');
         const waMsg = encodeURIComponent(`Namaste ${s.name || ''} ji! BillZen Billing Software se bol rahe hain. Aapka software trial kaisa chal raha hai? Agar plan renew ya extend karwana ho to batayein.`);
-        return `<tr style="border-bottom:1px solid var(--border);">
-          <td style="padding:10px 14px;">
-            <b style="font-size:13px;color:#1e1b4b;">${s.shop_name || s.name + ' Store'}</b><br>
-            <span style="color:var(--gray);font-size:11px;">Owner: ${s.name} (@${s.username})</span>
+        return `<tr style="border-bottom:1px solid var(--border);transition:background 0.15s;" onmouseover="this.style.background='#faf5ff'" onmouseout="this.style.background=''">
+          <td style="padding:10px 14px;cursor:pointer;" onclick="openMasterClientDetails(${s.id})" title="Click to view complete details of ${escapeHtml(s.shop_name || s.name)}">
+            <div style="display:flex;align-items:flex-start;gap:8px;">
+              <span style="font-size:16px;margin-top:2px;">🏪</span>
+              <div>
+                <b style="font-size:13px;color:#6d28d9;text-decoration:underline dotted #8b5cf6;">${escapeHtml(s.shop_name || s.name + ' Store')}</b><br>
+                <span style="color:var(--gray);font-size:11px;">Owner: <b>${escapeHtml(s.name)}</b> (@${escapeHtml(s.username)})</span>
+              </div>
+            </div>
           </td>
           <td style="padding:10px 14px;">
-            <span>📞 ${s.shop_phone || 'No phone'}</span><br>
-            <span style="color:var(--gray);font-size:11px;">${s.shop_gstin ? 'GST: ' + s.shop_gstin : 'Unregistered'}</span>
+            <span>📞 ${escapeHtml(s.shop_phone || 'No phone')}</span><br>
+            <span style="color:var(--gray);font-size:11px;">${s.shop_gstin ? 'GST: ' + escapeHtml(s.shop_gstin) : 'Unregistered'}</span>
           </td>
           <td style="padding:10px 14px;">
             <span style="display:inline-block;padding:3px 10px;border-radius:12px;font-size:11px;font-weight:700;
-              background:${isLife ? '#fef3c7' : isAct ? '#dbeafe' : isExp ? '#fee2e2' : '#dcfce7'};
-              color:${isLife ? '#b45309' : isAct ? '#1d4ed8' : isExp ? '#dc2626' : '#15803d'};">
-              ${p.label || 'Trial'}
+              background:${isSuspended ? '#ffe4e6' : isLife ? '#fef3c7' : isAct ? '#dbeafe' : isExp ? '#fee2e2' : '#dcfce7'};
+              color:${isSuspended ? '#e11d48' : isLife ? '#b45309' : isAct ? '#1d4ed8' : isExp ? '#dc2626' : '#15803d'};">
+              ${isSuspended ? '⛔ Suspended / Stopped' : (p.label || 'Trial')}
             </span>
             <div style="font-size:10px;color:var(--gray);margin-top:3px;">
-              ${p.expires_at ? 'Till: ' + p.expires_at.split(' ')[0] : ''}
+              ${isSuspended ? '<span style="color:#e11d48;font-weight:600;">Access Stopped</span>' : (p.expires_at ? 'Till: ' + p.expires_at.split(' ')[0] : '')}
             </div>
           </td>
           <td style="padding:10px 14px;">
@@ -7704,18 +7996,272 @@ async function loadMasterClients() {
             <span style="color:var(--gray);font-size:11px;">₹${(s.total_revenue || 0).toLocaleString('en-IN')} billed</span>
           </td>
           <td style="padding:10px 14px;">
-            <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
-              <button onclick="masterExtendPlan(${s.id}, 30, '${(s.name||'').replace(/'/g, "\\'")}')" style="padding:5px 9px;background:#f3f0ff;color:#7c3aed;border:1px solid #c4b5fd;border-radius:6px;cursor:pointer;font-size:11px;font-weight:700;" title="Extend 30 Days">+30d</button>
-              <button onclick="masterExtendPlan(${s.id}, 365, '${(s.name||'').replace(/'/g, "\\'")}')" style="padding:5px 9px;background:#f0fdf4;color:#16a34a;border:1px solid #bbf7d0;border-radius:6px;cursor:pointer;font-size:11px;font-weight:700;" title="Extend 1 Year">+1 Yr</button>
-              <button onclick="masterExtendPlan(${s.id}, 'lifetime', '${(s.name||'').replace(/'/g, "\\'")}')" style="padding:5px 9px;background:#fef3c7;color:#b45309;border:1px solid #fde68a;border-radius:6px;cursor:pointer;font-size:11px;font-weight:700;" title="Lifetime Free">👑 Lifetime</button>
-              <button onclick="masterBlockShop(${s.id}, '${(s.name||'').replace(/'/g, "\\'")}')" style="padding:5px 8px;background:#fee2e2;color:#dc2626;border:none;border-radius:6px;cursor:pointer;font-size:11px;font-weight:700;" title="Block access">🚫</button>
-              ${cleanPh.length >= 10 ? `<a href="https://wa.me/91${cleanPh.slice(-10)}?text=${waMsg}" target="_blank" style="padding:5px 9px;background:#25d366;color:white;border-radius:6px;font-size:11px;font-weight:700;text-decoration:none;display:inline-flex;align-items:center;gap:3px;">💬 WA</a>` : ''}
+            <div style="display:flex;gap:5px;flex-wrap:wrap;align-items:center;">
+              <button onclick="openMasterClientDetails(${s.id})" style="padding:5px 8px;background:#f5f3ff;color:#7c3aed;border:1px solid #ddd6fe;border-radius:6px;cursor:pointer;font-size:11px;font-weight:700;" title="View Complete Client Details">🔍 Details</button>
+              <button onclick="masterExtendPlan(${s.id}, 30, '${(s.name||'').replace(/'/g, "\\'")}')" style="padding:5px 8px;background:#f3f0ff;color:#7c3aed;border:1px solid #c4b5fd;border-radius:6px;cursor:pointer;font-size:11px;font-weight:700;" title="Extend 30 Days">+30d</button>
+              <button onclick="masterExtendPlan(${s.id}, 365, '${(s.name||'').replace(/'/g, "\\'")}')" style="padding:5px 8px;background:#f0fdf4;color:#16a34a;border:1px solid #bbf7d0;border-radius:6px;cursor:pointer;font-size:11px;font-weight:700;" title="Extend 1 Year">+1 Yr</button>
+              <button onclick="masterExtendPlan(${s.id}, 'lifetime', '${(s.name||'').replace(/'/g, "\\'")}')" style="padding:5px 8px;background:#fef3c7;color:#b45309;border:1px solid #fde68a;border-radius:6px;cursor:pointer;font-size:11px;font-weight:700;" title="Lifetime Free">👑 Lifetime</button>
+              ${isSuspended ? `
+                <button onclick="masterToggleShopStatus(${s.id}, 'activate', '${(s.name||'').replace(/'/g, "\\'")}')" style="padding:5px 8px;background:#ecfdf5;color:#059669;border:1px solid #a7f3d0;border-radius:6px;cursor:pointer;font-size:11px;font-weight:700;" title="Resume / Activate Subscription">▶️ Resume</button>
+              ` : `
+                <button onclick="masterToggleShopStatus(${s.id}, 'suspend', '${(s.name||'').replace(/'/g, "\\'")}')" style="padding:5px 8px;background:#fee2e2;color:#dc2626;border:1px solid #fecaca;border-radius:6px;cursor:pointer;font-size:11px;font-weight:700;" title="Stop / Suspend Subscription">⛔ Stop</button>
+              `}
+              ${cleanPh.length >= 10 ? `<a href="https://wa.me/91${cleanPh.slice(-10)}?text=${waMsg}" target="_blank" style="padding:5px 8px;background:#25d366;color:white;border-radius:6px;font-size:11px;font-weight:700;text-decoration:none;display:inline-flex;align-items:center;gap:3px;" title="Chat on WhatsApp">💬 WA</a>` : ''}
             </div>
           </td>
         </tr>`;
       }).join('')}
     </tbody>
   </table>`;
+}
+
+async function openMasterClientDetails(userId) {
+  let client = _masterShopsList.find(s => s.id === userId);
+  if (!client) {
+    await loadMasterClients();
+    client = _masterShopsList.find(s => s.id === userId);
+  }
+  if (!client) {
+    toast('Client details not found', 'error');
+    return;
+  }
+  _masterCurrentClient = client;
+
+  // Header
+  document.getElementById('mcd-header-shopname').textContent = client.shop_name || client.name + ' Store';
+  const p = client.plan_info || {};
+  const isSuspended = p.status === 'suspended' || client.plan_status === 'suspended';
+  const isLife = p.status === 'lifetime';
+  const isAct = p.status === 'active';
+  const isExp = p.status === 'expired';
+
+  const badgeEl = document.getElementById('mcd-header-badge');
+  if (badgeEl) {
+    badgeEl.textContent = isSuspended ? '⛔ Suspended / Stopped' : (p.label || 'Trial');
+    badgeEl.style.background = isSuspended ? '#ffe4e6' : isLife ? '#fef3c7' : isAct ? '#dbeafe' : isExp ? '#fee2e2' : '#dcfce7';
+    badgeEl.style.color = isSuspended ? '#e11d48' : isLife ? '#b45309' : isAct ? '#1d4ed8' : isExp ? '#dc2626' : '#15803d';
+  }
+
+  // Credentials
+  document.getElementById('mcd-val-username').textContent = '@' + client.username;
+  const pwdHint = document.getElementById('mcd-pwd-hint');
+  if (pwdHint) {
+    pwdHint.textContent = 'Stored securely as cryptographic hash. Plaintext is never stored. Use Reset Password to set a new password.';
+  }
+
+  // Reset box reset
+  toggleMcdResetBox(false);
+
+  // Subscription Box
+  document.getElementById('mcd-val-planlabel').textContent = p.label || '7-Day Free Trial';
+  document.getElementById('mcd-val-expiresat').textContent = isSuspended ? 'Subscription Stopped' : (p.expires_at ? p.expires_at : (p.days_left ? p.days_left + ' days left' : 'Expired'));
+  
+  const subStatusBadge = document.getElementById('mcd-sub-status-badge');
+  if (subStatusBadge) {
+    subStatusBadge.innerHTML = `<span style="padding:3px 9px;border-radius:12px;font-size:11px;font-weight:700;background:${isSuspended?'#ffe4e6':isAct?'#dbeafe':isLife?'#fef3c7':'#fee2e2'};color:${isSuspended?'#e11d48':isAct?'#1d4ed8':isLife?'#b45309':'#dc2626'};">${isSuspended ? '⛔ Stopped' : isAct ? '💎 Active' : isLife ? '👑 Lifetime' : '⏳ Trial'}</span>`;
+  }
+
+  const btnToggleStatus = document.getElementById('btnMcdToggleStatus');
+  if (btnToggleStatus) {
+    if (isSuspended) {
+      btnToggleStatus.textContent = '▶️ Reactivate Subscription';
+      btnToggleStatus.style.background = '#059669';
+      btnToggleStatus.style.color = '#fff';
+      btnToggleStatus.style.border = 'none';
+    } else {
+      btnToggleStatus.textContent = '⛔ Stop / Suspend Subscription';
+      btnToggleStatus.style.background = '#fee2e2';
+      btnToggleStatus.style.color = '#dc2626';
+      btnToggleStatus.style.border = '1px solid #fecaca';
+    }
+  }
+
+  // Business & Contact Details
+  document.getElementById('mcd-val-shopname').textContent = client.shop_name || '-';
+  document.getElementById('mcd-val-ownername').textContent = client.name || '-';
+  document.getElementById('mcd-val-phone').textContent = client.shop_phone || 'No phone';
+
+  const cleanPh = (client.shop_phone || '').replace(/[^0-9]/g, '');
+  const waContainer = document.getElementById('mcd-val-wa-link');
+  if (waContainer) {
+    if (cleanPh.length >= 10) {
+      const waMsg = encodeURIComponent(`Namaste ${client.name || ''} ji! BillZen Billing Software se.`);
+      waContainer.innerHTML = `<a href="https://wa.me/91${cleanPh.slice(-10)}?text=${waMsg}" target="_blank" style="padding:2px 7px;background:#25d366;color:white;border-radius:4px;font-size:10px;font-weight:700;text-decoration:none;display:inline-flex;align-items:center;gap:3px;" title="Chat on WhatsApp">💬 WA</a>`;
+    } else {
+      waContainer.innerHTML = '';
+    }
+  }
+
+  document.getElementById('mcd-val-gstin').textContent = client.shop_gstin || 'Unregistered';
+  document.getElementById('mcd-val-state').textContent = client.shop_state || '-';
+  document.getElementById('mcd-val-createdat').textContent = client.created_at ? client.created_at.split(' ')[0] : '-';
+  document.getElementById('mcd-val-address').textContent = client.shop_address || 'Not specified';
+  document.getElementById('mcd-val-email').textContent = client.shop_email || '-';
+
+  // Activity
+  document.getElementById('mcd-val-billcnt').textContent = `${client.bill_count || 0} bills`;
+  document.getElementById('mcd-val-revenue').textContent = `₹${(client.total_revenue || 0).toLocaleString('en-IN')}`;
+
+  // Ensure view mode is active
+  switchToMcdViewMode();
+
+  openModal('masterClientDetailsModal');
+}
+
+function toggleMcdResetBox(forceState) {
+  const box = document.getElementById('mcd-reset-box');
+  if (!box) return;
+  if (typeof forceState === 'boolean') {
+    box.style.display = forceState ? 'block' : 'none';
+  } else {
+    box.style.display = box.style.display === 'none' ? 'block' : 'none';
+  }
+  if (box.style.display === 'block') {
+    const inp = document.getElementById('mcd-new-pwd');
+    if (inp) { inp.value = ''; inp.focus(); }
+  }
+}
+
+function generateRandomMcdPassword() {
+  const rand = 'bz_' + Math.floor(1000 + Math.random() * 9000);
+  const inp = document.getElementById('mcd-new-pwd');
+  if (inp) inp.value = rand;
+}
+
+async function confirmResetMcdPassword() {
+  if (!_masterCurrentClient) return;
+  const newPwd = (document.getElementById('mcd-new-pwd')?.value || '').trim();
+  if (!newPwd || newPwd.length < 4) {
+    toast('Password must be at least 4 characters!', 'error');
+    return;
+  }
+  if (!confirm(`Are you sure you want to reset password for "${_masterCurrentClient.name}" (@${_masterCurrentClient.username})?`)) {
+    return;
+  }
+
+  const r = await api('POST', '/api/master/reset-password', {
+    target_user_id: _masterCurrentClient.id,
+    new_password: newPwd
+  });
+
+  if (r.ok) {
+    toast(`✅ Password reset successfully for @${_masterCurrentClient.username}!`, 'success');
+    toggleMcdResetBox(false);
+    loadMasterClients();
+  } else {
+    toast(r.data?.error || 'Failed to reset password', 'error');
+  }
+}
+
+function switchToMcdEditMode() {
+  if (!_masterCurrentClient) return;
+  const c = _masterCurrentClient;
+  document.getElementById('mcd-view-container').style.display = 'none';
+  document.getElementById('mcd-edit-container').style.display = 'block';
+
+  document.getElementById('mcd-edit-userid').value = c.id;
+  document.getElementById('mcd-edit-shopname').value = c.shop_name || '';
+  document.getElementById('mcd-edit-ownername').value = c.name || '';
+  document.getElementById('mcd-edit-phone').value = c.shop_phone || '';
+  document.getElementById('mcd-edit-gstin').value = c.shop_gstin || '';
+  if (document.getElementById('mcd-edit-state')) {
+    document.getElementById('mcd-edit-state').value = c.shop_state || 'DELHI';
+  }
+  document.getElementById('mcd-edit-address').value = c.shop_address || '';
+  document.getElementById('mcd-edit-email').value = c.shop_email || '';
+
+  document.getElementById('btnMcdSwitchEdit').style.display = 'none';
+  document.getElementById('btnMcdCancelEdit').style.display = '';
+  document.getElementById('btnMcdSaveEdit').style.display = '';
+}
+
+function switchToMcdViewMode() {
+  document.getElementById('mcd-view-container').style.display = 'block';
+  document.getElementById('mcd-edit-container').style.display = 'none';
+
+  document.getElementById('btnMcdSwitchEdit').style.display = '';
+  document.getElementById('btnMcdCancelEdit').style.display = 'none';
+  document.getElementById('btnMcdSaveEdit').style.display = 'none';
+}
+
+async function saveMasterClientEdit() {
+  if (!_masterCurrentClient) return;
+  const userId = _masterCurrentClient.id;
+  const shopName = (document.getElementById('mcd-edit-shopname')?.value || '').trim();
+  const ownerName = (document.getElementById('mcd-edit-ownername')?.value || '').trim();
+  const phone = (document.getElementById('mcd-edit-phone')?.value || '').trim();
+  const gstin = (document.getElementById('mcd-edit-gstin')?.value || '').trim().toUpperCase();
+  const state = document.getElementById('mcd-edit-state')?.value || 'DELHI';
+  const address = (document.getElementById('mcd-edit-address')?.value || '').trim();
+  const email = (document.getElementById('mcd-edit-email')?.value || '').trim();
+
+  if (!shopName || !ownerName) {
+    toast('Shop name and Owner name are required!', 'error');
+    return;
+  }
+
+  const r = await api('POST', '/api/master/update-shop', {
+    target_user_id: userId,
+    shop_name: shopName,
+    name: ownerName,
+    phone: phone,
+    gstin: gstin,
+    state: state,
+    address: address,
+    email: email
+  });
+
+  if (r.ok) {
+    toast(`✅ Details updated for '${shopName}'!`, 'success');
+    _masterCurrentClient.shop_name = shopName;
+    _masterCurrentClient.name = ownerName;
+    _masterCurrentClient.shop_phone = phone;
+    _masterCurrentClient.shop_gstin = gstin;
+    _masterCurrentClient.shop_state = state;
+    _masterCurrentClient.shop_address = address;
+    _masterCurrentClient.shop_email = email;
+
+    await loadMasterClients();
+    openMasterClientDetails(userId);
+  } else {
+    toast(r.data?.error || 'Failed to update client details', 'error');
+  }
+}
+
+async function mcdToggleStatusAction() {
+  if (!_masterCurrentClient) return;
+  await masterToggleShopStatus(_masterCurrentClient.id, null, _masterCurrentClient.shop_name || _masterCurrentClient.name);
+}
+
+async function mcdExtendPlanAction(days) {
+  if (!_masterCurrentClient) return;
+  await masterExtendPlan(_masterCurrentClient.id, days, _masterCurrentClient.shop_name || _masterCurrentClient.name);
+  if (_masterCurrentClient) {
+    openMasterClientDetails(_masterCurrentClient.id);
+  }
+}
+
+async function masterToggleShopStatus(userId, action, name) {
+  const client = _masterShopsList.find(s => s.id === userId) || _masterCurrentClient;
+  const isSuspended = client ? (client.plan_status === 'suspended' || client.plan_info?.status === 'suspended') : false;
+  const targetAction = action || (isSuspended ? 'activate' : 'suspend');
+
+  const confirmMsg = targetAction === 'suspend' 
+    ? `Are you sure you want to STOP / SUSPEND subscription for "${name}"?\n\nThe shop will not be able to generate bills or log in until reactivated.`
+    : `Reactivate subscription for "${name}"?`;
+
+  if (!confirm(confirmMsg)) return;
+
+  const r = await api('POST', '/api/master/toggle-status', { target_user_id: userId, action: targetAction });
+  if (r.ok) {
+    toast(r.data?.message || 'Status updated', 'success');
+    await loadMasterClients();
+    if (_masterCurrentClient && _masterCurrentClient.id === userId) {
+      openMasterClientDetails(userId);
+    }
+  } else {
+    toast(r.data?.error || 'Failed to update subscription status', 'error');
+  }
 }
 
 async function masterExtendPlan(userId, days, name) {
@@ -7731,14 +8277,7 @@ async function masterExtendPlan(userId, days, name) {
 }
 
 async function masterBlockShop(userId, name) {
-  if (!confirm(`Block & expire subscription for "${name}"?`)) return;
-  const r = await api('POST', '/api/master/block-shop', { target_user_id: userId });
-  if (r.ok) {
-    toast(`⚠️ Shop "${name}" blocked`);
-    loadMasterClients();
-  } else {
-    toast(r.data?.error || 'Error blocking shop', 'error');
-  }
+  await masterToggleShopStatus(userId, 'suspend', name);
 }
 
 function autoSuggestClientUsername() {
@@ -7871,18 +8410,44 @@ async function loadStockAdjust() {
 function fillAdjProduct() {
   const sel = document.getElementById('adj-product');
   const opt = sel.options[sel.selectedIndex];
-  document.getElementById('adj-current').value = opt.dataset.stock || '';
-  document.getElementById('adj-unit').value = opt.dataset.unit || '';
+  document.getElementById('adj-current').value = opt ? (opt.dataset.stock || '') : '';
+  const unit = opt ? (opt.dataset.unit || '') : '';
+  document.getElementById('adj-unit').value = unit;
+  const qtyInput = document.getElementById('adj-qty');
+  if (qtyInput) {
+    const discreteUnits = ['pcs', 'pc', 'piece', 'pieces', 'box', 'boxes', 'pack', 'packs', 'nos', 'no', 'number', 'numbers', 'set', 'sets', 'pair', 'pairs', 'dozen', 'dzn', 'carton', 'ctn', 'bottle', 'bottles', 'bag', 'bags', 'unit', 'units'];
+    const isDiscrete = !unit || discreteUnits.includes(unit.toLowerCase().trim());
+    if (isDiscrete) {
+      qtyInput.step = '1';
+      qtyInput.min = '1';
+      qtyInput.placeholder = 'Enter whole quantity (e.g. 1, 2)';
+    } else {
+      qtyInput.step = '0.01';
+      qtyInput.min = '0.01';
+      qtyInput.placeholder = 'Enter quantity (e.g. 1.50)';
+    }
+  }
 }
 
 async function saveStockAdjustment() {
   const prodId = document.getElementById('adj-product').value;
-  const qty    = parseFloat(document.getElementById('adj-qty').value);
+  const qtyVal = document.getElementById('adj-qty').value;
+  const qty    = parseFloat(qtyVal);
   const type   = document.querySelector('input[name="adj-type"]:checked').value;
   const reason = document.getElementById('adj-reason').value;
   const notes  = document.getElementById('adj-notes').value;
   if (!prodId) { toast('Select a product', 'error'); return; }
   if (!qty || qty <= 0) { toast('Enter valid quantity', 'error'); return; }
+
+  const sel = document.getElementById('adj-product');
+  const opt = sel ? sel.options[sel.selectedIndex] : null;
+  const unit = (opt?.dataset?.unit || '').toLowerCase().trim();
+  const discreteUnits = ['pcs', 'pc', 'piece', 'pieces', 'box', 'boxes', 'pack', 'packs', 'nos', 'no', 'number', 'numbers', 'set', 'sets', 'pair', 'pairs', 'dozen', 'dzn', 'carton', 'ctn', 'bottle', 'bottles', 'bag', 'bags', 'unit', 'units'];
+  const isDiscrete = !unit || discreteUnits.includes(unit);
+  if (isDiscrete && !Number.isInteger(Number(qtyVal))) {
+    toast(`Fractional quantities not allowed for countable unit (${opt?.dataset?.unit || 'Pcs'}). Please enter a whole number.`, 'error');
+    return;
+  }
 
   const r = await api('POST', '/api/stock/adjust', { product_id: parseInt(prodId), qty, type, reason, notes });
   if (r.ok) {
@@ -7987,11 +8552,17 @@ function initiateReturnFromPurchase() {
   openPurchaseReturnForInv(ref);
 }
 
+function isDiscreteUnit(u) {
+  if (!u) return true;
+  const discrete = ['pcs','pc','piece','pieces','box','boxes','pack','packs','nos','no','number','numbers','set','sets','pair','pairs','dozen','dzn','carton','ctn','bottle','bottles','bag','bags','unit','units'];
+  return discrete.includes(String(u).trim().toLowerCase());
+}
+
 async function fetchReturnBill(optBillId) {
   const billId = (optBillId || document.getElementById('ret-billid')?.value || '').trim();
   if (!billId) { toast('Enter original Bill ID', 'error'); return; }
   toast('⏳ Loading returnable items...');
-  const r = await api('GET', `/api/sales/${encodeURIComponent(billId)}/return-context`);
+  const r = await api('GET', `/api/sales/return-context?bill_id=${encodeURIComponent(billId)}`);
   if (!r.ok) { toast(r.data?.error || 'Sales bill not found', 'error'); return; }
 
   const { sale, items } = r.data;
@@ -8013,7 +8584,7 @@ async function fetchReturnBill(optBillId) {
 
   const detailsEl = document.getElementById('ret-bill-details');
   if (detailsEl) {
-    detailsEl.innerHTML = `Customer: <b>${sale.customer_name}</b> | GSTIN: <b>${sale.customer_gstin || 'Unregistered'}</b> | Total Billed: <b>${fmt(sale.total_amount)}</b>`;
+    detailsEl.innerHTML = `Customer: <b>${escapeHtml(sale.customer_name||'')}</b> | GSTIN: <b>${sale.customer_gstin || 'Unregistered'}</b> | Total Billed: <b>${fmt(sale.total_amount)}</b>`;
   }
 
   const itemsDiv = document.getElementById('ret-items-div');
@@ -8024,11 +8595,13 @@ async function fetchReturnBill(optBillId) {
 
   itemsDiv.innerHTML = items.map((it, i) => {
     const isAvailable = it.returnable_qty > 0;
+    const isDisc = isDiscreteUnit(it.unit);
+    const stepVal = isDisc ? "1" : "0.01";
     return `
       <div style="background:${isAvailable ? '#ffffff' : '#f8fafc'};border:1px solid ${isAvailable ? '#e2e8f0' : '#e5e7eb'};border-radius:8px;padding:10px;margin-bottom:8px;opacity:${isAvailable ? '1' : '0.6'};">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
           <div>
-            <span style="font-weight:700;font-size:12px;color:#1e293b;">${it.product}</span>
+            <span style="font-weight:700;font-size:12px;color:#1e293b;">${escapeHtml(it.product)}</span>
             <span style="font-size:11px;color:var(--gray);margin-left:6px;">HSN: ${it.hsn_code || 'N/A'}</span>
           </div>
           <span style="font-size:11px;font-weight:700;color:${isAvailable ? '#15803d' : '#dc2626'};">
@@ -8042,11 +8615,11 @@ async function fetchReturnBill(optBillId) {
           <span style="color:var(--gray);">GST: <b>${it.gst_pct}%</b></span>
           <div style="display:flex;align-items:center;gap:6px;margin-left:auto;">
             <label style="font-weight:700;color:#334155;">Return Qty:</label>
-            <input type="number" id="ret-qty-${i}" value="${isAvailable ? 0 : 0}" min="0" max="${it.returnable_qty}" step="0.01"
+            <input type="number" id="ret-qty-${i}" value="${isAvailable ? 0 : 0}" min="0" max="${it.returnable_qty}" step="${stepVal}"
               ${!isAvailable ? 'disabled' : ''}
               style="width:72px;padding:4px 6px;border:1.5px solid var(--border);border-radius:6px;font-size:12px;text-align:right;"
-              data-price="${it.price}" data-gst="${it.gst_pct}" data-max="${it.returnable_qty}"
-              oninput="validateAndCalcSalesReturn(${i})">
+              data-price="${it.price}" data-gst="${it.gst_pct}" data-max="${it.returnable_qty}" data-unit="${it.unit || 'Pcs'}"
+              oninput="validateAndCalcSalesReturn(${i})" onchange="validateAndCalcSalesReturn(${i})">
           </div>
         </div>
       </div>
@@ -8066,6 +8639,13 @@ function validateAndCalcSalesReturn(index) {
   if (val > max) {
     toast(`⚠️ Maximum returnable quantity for this item is ${max}`, 'warning');
     el.value = max;
+    val = max;
+  }
+  const isDisc = isDiscreteUnit(el.dataset.unit);
+  if (isDisc && val % 1 !== 0) {
+    val = Math.floor(val);
+    el.value = val;
+    toast(`⚠️ Fractional quantity not allowed for ${el.dataset.unit || 'Pcs'}. Using whole number.`, 'warning');
   }
   calcSalesReturnSummary();
 }
@@ -8073,7 +8653,7 @@ function validateAndCalcSalesReturn(index) {
 function calcSalesReturnSummary() {
   if (!_returnContext) return;
   const isInter = Boolean(_returnContext.sale.is_interstate || (_returnContext.sale.igst_amount && _returnContext.sale.igst_amount > 0));
-  let totTaxable = 0, totCgst = 0, totSgst = 0, totIgst = 0, totAmount = 0;
+  let totTaxable = 0, totCgst = 0, totSgst = 0, totIgst = 0;
 
   _returnContext.items.forEach((it, i) => {
     const el = document.getElementById(`ret-qty-${i}`);
@@ -8083,25 +8663,24 @@ function calcSalesReturnSummary() {
       const price = parseFloat(el.dataset.price) || 0;
       const gstPct = parseFloat(el.dataset.gst) || 18;
       const taxable = Math.round(qty * price * 100) / 100;
-      let tax = 0;
       if (isInter) {
         const igst = Math.round(taxable * (gstPct / 100) * 100) / 100;
         totIgst += igst;
-        tax = igst;
       } else {
         const half = gstPct / 2;
         const cgst = Math.round(taxable * (half / 100) * 100) / 100;
         const sgst = Math.round(taxable * (half / 100) * 100) / 100;
         totCgst += cgst;
         totSgst += sgst;
-        tax = cgst + sgst;
       }
       totTaxable += taxable;
-      totAmount += (taxable + tax);
     }
   });
 
-  const totTax = totCgst + totSgst + totIgst;
+  totTaxable = Math.round(totTaxable * 100) / 100;
+  const totTax = Math.round((totCgst + totSgst + totIgst) * 100) / 100;
+  const totAmount = Math.round((totTaxable + totTax) * 100) / 100;
+
   const taxEl = document.getElementById('ret-summary-taxable');
   if (taxEl) taxEl.textContent = fmt(totTaxable);
   const taxAdjEl = document.getElementById('ret-summary-tax');
@@ -8110,15 +8689,43 @@ function calcSalesReturnSummary() {
   if (amtEl) amtEl.textContent = fmt(totAmount);
 }
 
+function clearSalesReturnForm(silent = false) {
+  _returnContext = null;
+  const billInp = document.getElementById('ret-billid');
+  if (billInp) billInp.value = '';
+  const infoBox = document.getElementById('ret-bill-info');
+  if (infoBox) infoBox.style.display = 'none';
+  const detailsEl = document.getElementById('ret-bill-details');
+  if (detailsEl) detailsEl.innerHTML = '';
+  const itemsDiv = document.getElementById('ret-items-div');
+  if (itemsDiv) itemsDiv.innerHTML = '<div style="text-align:center;color:var(--gray);padding:24px;font-size:12px;">Fetch an original sales bill to view returnable items</div>';
+  const taxEl = document.getElementById('ret-summary-taxable');
+  if (taxEl) taxEl.textContent = '₹0.00';
+  const taxAdjEl = document.getElementById('ret-summary-tax');
+  if (taxAdjEl) taxAdjEl.textContent = '₹0.00';
+  const amtEl = document.getElementById('ret-amount');
+  if (amtEl) amtEl.textContent = '₹0.00';
+  const reasonEl = document.getElementById('ret-reason');
+  if (reasonEl) reasonEl.selectedIndex = 0;
+  const refundModeEl = document.getElementById('ret-refund-mode');
+  if (refundModeEl) refundModeEl.selectedIndex = 0;
+  if (!silent) toast('Fetched bill cleared');
+}
+
 async function saveSalesReturnEnterprise() {
   if (!_returnContext) { toast('Please fetch a valid sales bill first', 'error'); return; }
   const { sale, items } = _returnContext;
   const returnItems = [];
 
-  items.forEach((it, i) => {
+  for (let i = 0; i < items.length; i++) {
+    const it = items[i];
     const el = document.getElementById(`ret-qty-${i}`);
     const qty = parseFloat(el?.value) || 0;
     if (qty > 0) {
+      if (isDiscreteUnit(it.unit) && qty % 1 !== 0) {
+        toast(`⚠️ Item '${it.product}' has unit '${it.unit || 'Pcs'}' and cannot have fractional return quantity (${qty}). Please enter a whole number.`, 'error');
+        return;
+      }
       returnItems.push({
         original_item_id: it.original_item_id,
         product: it.product,
@@ -8128,7 +8735,7 @@ async function saveSalesReturnEnterprise() {
         gst_pct: it.gst_pct
       });
     }
-  });
+  }
 
   if (!returnItems.length) { toast('Enter return quantity for at least one item', 'error'); return; }
 
@@ -8147,15 +8754,7 @@ async function saveSalesReturnEnterprise() {
   }
 
   toast(`✅ Return Processed! Credit Note: ${res.data.credit_note_no}`, 'success');
-  _returnContext = null;
-  const billInp = document.getElementById('ret-billid');
-  if (billInp) billInp.value = '';
-  const infoBox = document.getElementById('ret-bill-info');
-  if (infoBox) infoBox.style.display = 'none';
-  const itemsDiv = document.getElementById('ret-items-div');
-  if (itemsDiv) itemsDiv.innerHTML = '<div style="text-align:center;padding:24px;color:var(--gray);">Fetch an original sales bill to view returnable items</div>';
-  const amtEl = document.getElementById('ret-amount');
-  if (amtEl) amtEl.textContent = '₹0.00';
+  clearSalesReturnForm(true);
 
   loadSalesReturnsHistory();
   loadAllProducts();
@@ -8167,7 +8766,7 @@ async function loadSalesReturnsHistory() {
   if (!div) return;
   const res = await api('GET', '/api/sales/returns');
   if (!res.ok) return;
-  const list = res.data.returns || [];
+  const list = res.data.sales_returns || res.data.returns || [];
 
   if (!list.length) {
     div.innerHTML = '<div class="empty-state"><div class="empty-icon">↩️</div><div class="empty-text">No credit notes issued yet</div></div>';
@@ -8184,11 +8783,11 @@ async function loadSalesReturnsHistory() {
         <span style="font-size:13px;font-weight:800;color:#dc2626;">${fmt(cn.total_amount)}</span>
       </div>
       <div style="display:flex;justify-content:space-between;font-size:11px;color:#475569;margin-bottom:8px;">
-        <span>Party: <b>${cn.customer_name}</b></span>
+        <span>Party: <b>${escapeHtml(cn.customer_name||'Walk-in')}</b></span>
         <span>Date: ${cn.return_date}</span>
       </div>
       <div style="display:flex;justify-content:space-between;align-items:center;font-size:11px;border-top:1px solid #f1f5f9;padding-top:6px;">
-        <span style="color:var(--gray);">Reason: ${cn.reason || 'Goods Return'} (${cn.refund_mode})</span>
+        <span style="color:var(--gray);">Reason: ${escapeHtml(cn.reason || 'Goods Return')} (${escapeHtml(cn.refund_mode||'')})</span>
         <div style="display:flex;gap:6px;">
           <button onclick="printCreditNoteDirect('${cn.credit_note_no}')" class="btn btn-outline" style="font-size:10px;padding:3px 8px;">🖨️ Print</button>
           <button onclick="waCreditNoteDirect('${cn.credit_note_no}')" class="btn btn-outline" style="font-size:10px;padding:3px 8px;color:#16a34a;">📱 WA</button>
@@ -8198,12 +8797,17 @@ async function loadSalesReturnsHistory() {
   `).join('');
 }
 
+function exportSalesReturnsCSV() {
+  window.location.href = '/api/sales/returns/export/excel';
+  toast('📊 Downloading Credit Notes Excel...');
+}
+
 // ════════ PURCHASE RETURN (DEBIT NOTE) WORKFLOW ════════
 async function fetchPurchaseReturnInv(optInvRef) {
   const ref = (optInvRef || document.getElementById('pret-invref')?.value || '').trim();
   if (!ref) { toast('Enter original Purchase Reference / Invoice No', 'error'); return; }
   toast('⏳ Loading purchase items...');
-  const r = await api('GET', `/api/purchases/${encodeURIComponent(ref)}/return-context`);
+  const r = await api('GET', `/api/purchases/return-context?ref=${encodeURIComponent(ref)}`);
   if (!r.ok) { toast(r.data?.error || 'Purchase invoice not found', 'error'); return; }
 
   const { purchase, items } = r.data;
@@ -8225,7 +8829,7 @@ async function fetchPurchaseReturnInv(optInvRef) {
 
   const detailsEl = document.getElementById('pret-bill-details');
   if (detailsEl) {
-    detailsEl.innerHTML = `Supplier: <b>${purchase.supplier_name || 'N/A'}</b> | GSTIN: <b>${purchase.supplier_gstin || 'Unregistered'}</b> | Total: <b>${fmt(purchase.total_amount)}</b>`;
+    detailsEl.innerHTML = `Supplier: <b>${escapeHtml(purchase.supplier_name || 'N/A')}</b> | GSTIN: <b>${purchase.supplier_gstin || 'Unregistered'}</b> | Total: <b>${fmt(purchase.total_amount)}</b>`;
   }
 
   const itemsDiv = document.getElementById('pret-items-div');
@@ -8236,11 +8840,13 @@ async function fetchPurchaseReturnInv(optInvRef) {
 
   itemsDiv.innerHTML = items.map((it, i) => {
     const isAvailable = it.returnable_qty > 0;
+    const isDisc = isDiscreteUnit(it.unit);
+    const stepVal = isDisc ? "1" : "0.01";
     return `
       <div style="background:${isAvailable ? '#ffffff' : '#f8fafc'};border:1px solid ${isAvailable ? '#e2e8f0' : '#e5e7eb'};border-radius:8px;padding:10px;margin-bottom:8px;opacity:${isAvailable ? '1' : '0.6'};">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
           <div>
-            <span style="font-weight:700;font-size:12px;color:#1e293b;">${it.product}</span>
+            <span style="font-weight:700;font-size:12px;color:#1e293b;">${escapeHtml(it.product)}</span>
             <span style="font-size:11px;color:var(--gray);margin-left:6px;">HSN: ${it.hsn_code || 'N/A'}</span>
           </div>
           <span style="font-size:11px;font-weight:700;color:${isAvailable ? '#0284c7' : '#dc2626'};">
@@ -8254,11 +8860,11 @@ async function fetchPurchaseReturnInv(optInvRef) {
           <span style="color:var(--gray);">GST: <b>${it.gst_pct}%</b></span>
           <div style="display:flex;align-items:center;gap:6px;margin-left:auto;">
             <label style="font-weight:700;color:#334155;">Return Qty:</label>
-            <input type="number" id="pret-qty-${i}" value="${isAvailable ? 0 : 0}" min="0" max="${it.returnable_qty}" step="0.01"
+            <input type="number" id="pret-qty-${i}" value="${isAvailable ? 0 : 0}" min="0" max="${it.returnable_qty}" step="${stepVal}"
               ${!isAvailable ? 'disabled' : ''}
               style="width:72px;padding:4px 6px;border:1.5px solid var(--border);border-radius:6px;font-size:12px;text-align:right;"
-              data-price="${it.price}" data-gst="${it.gst_pct}" data-max="${it.returnable_qty}"
-              oninput="validateAndCalcPurchaseReturn(${i})">
+              data-price="${it.price}" data-gst="${it.gst_pct}" data-max="${it.returnable_qty}" data-unit="${it.unit || 'Pcs'}"
+              oninput="validateAndCalcPurchaseReturn(${i})" onchange="validateAndCalcPurchaseReturn(${i})">
           </div>
         </div>
       </div>
@@ -8278,6 +8884,13 @@ function validateAndCalcPurchaseReturn(index) {
   if (val > max) {
     toast(`⚠️ Maximum returnable quantity for this item is ${max}`, 'warning');
     el.value = max;
+    val = max;
+  }
+  const isDisc = isDiscreteUnit(el.dataset.unit);
+  if (isDisc && val % 1 !== 0) {
+    val = Math.floor(val);
+    el.value = val;
+    toast(`⚠️ Fractional quantity not allowed for ${el.dataset.unit || 'Pcs'}. Using whole number.`, 'warning');
   }
   calcPurchaseReturnSummary();
 }
@@ -8285,7 +8898,7 @@ function validateAndCalcPurchaseReturn(index) {
 function calcPurchaseReturnSummary() {
   if (!_purchaseReturnContext) return;
   const isInter = Boolean(_purchaseReturnContext.purchase.is_interstate || (_purchaseReturnContext.purchase.igst_amount && _purchaseReturnContext.purchase.igst_amount > 0));
-  let totTaxable = 0, totCgst = 0, totSgst = 0, totIgst = 0, totAmount = 0;
+  let totTaxable = 0, totCgst = 0, totSgst = 0, totIgst = 0;
 
   _purchaseReturnContext.items.forEach((it, i) => {
     const el = document.getElementById(`pret-qty-${i}`);
@@ -8295,25 +8908,24 @@ function calcPurchaseReturnSummary() {
       const price = parseFloat(el.dataset.price) || 0;
       const gstPct = parseFloat(el.dataset.gst) || 18;
       const taxable = Math.round(qty * price * 100) / 100;
-      let tax = 0;
       if (isInter) {
         const igst = Math.round(taxable * (gstPct / 100) * 100) / 100;
         totIgst += igst;
-        tax = igst;
       } else {
         const half = gstPct / 2;
         const cgst = Math.round(taxable * (half / 100) * 100) / 100;
         const sgst = Math.round(taxable * (half / 100) * 100) / 100;
         totCgst += cgst;
         totSgst += sgst;
-        tax = cgst + sgst;
       }
       totTaxable += taxable;
-      totAmount += (taxable + tax);
     }
   });
 
-  const totTax = totCgst + totSgst + totIgst;
+  totTaxable = Math.round(totTaxable * 100) / 100;
+  const totTax = Math.round((totCgst + totSgst + totIgst) * 100) / 100;
+  const totAmount = Math.round((totTaxable + totTax) * 100) / 100;
+
   const taxEl = document.getElementById('pret-summary-taxable');
   if (taxEl) taxEl.textContent = fmt(totTaxable);
   const taxAdjEl = document.getElementById('pret-summary-tax');
@@ -8322,15 +8934,43 @@ function calcPurchaseReturnSummary() {
   if (amtEl) amtEl.textContent = fmt(totAmount);
 }
 
+function clearPurchaseReturnForm(silent = false) {
+  _purchaseReturnContext = null;
+  const invInp = document.getElementById('pret-invref');
+  if (invInp) invInp.value = '';
+  const infoBox = document.getElementById('pret-bill-info');
+  if (infoBox) infoBox.style.display = 'none';
+  const detailsEl = document.getElementById('pret-bill-details');
+  if (detailsEl) detailsEl.innerHTML = '';
+  const itemsDiv = document.getElementById('pret-items-div');
+  if (itemsDiv) itemsDiv.innerHTML = '<div style="text-align:center;color:var(--gray);padding:24px;font-size:12px;">Fetch an original purchase invoice to view returnable items</div>';
+  const taxEl = document.getElementById('pret-summary-taxable');
+  if (taxEl) taxEl.textContent = '₹0.00';
+  const taxAdjEl = document.getElementById('pret-summary-tax');
+  if (taxAdjEl) taxAdjEl.textContent = '₹0.00';
+  const amtEl = document.getElementById('pret-amount');
+  if (amtEl) amtEl.textContent = '₹0.00';
+  const reasonEl = document.getElementById('pret-reason');
+  if (reasonEl) reasonEl.selectedIndex = 0;
+  const refundModeEl = document.getElementById('pret-refund-mode');
+  if (refundModeEl) refundModeEl.selectedIndex = 0;
+  if (!silent) toast('Fetched purchase invoice cleared');
+}
+
 async function savePurchaseReturnEnterprise() {
   if (!_purchaseReturnContext) { toast('Please fetch a valid purchase invoice first', 'error'); return; }
   const { purchase, items } = _purchaseReturnContext;
   const returnItems = [];
 
-  items.forEach((it, i) => {
+  for (let i = 0; i < items.length; i++) {
+    const it = items[i];
     const el = document.getElementById(`pret-qty-${i}`);
     const qty = parseFloat(el?.value) || 0;
     if (qty > 0) {
+      if (isDiscreteUnit(it.unit) && qty % 1 !== 0) {
+        toast(`⚠️ Item '${it.product}' has unit '${it.unit || 'Pcs'}' and cannot have fractional return quantity (${qty}). Please enter a whole number.`, 'error');
+        return;
+      }
       returnItems.push({
         original_item_id: it.original_item_id,
         product: it.product,
@@ -8340,7 +8980,7 @@ async function savePurchaseReturnEnterprise() {
         gst_pct: it.gst_pct
       });
     }
-  });
+  }
 
   if (!returnItems.length) { toast('Enter return quantity for at least one item', 'error'); return; }
 
@@ -8359,15 +8999,7 @@ async function savePurchaseReturnEnterprise() {
   }
 
   toast(`✅ Return Processed! Debit Note: ${res.data.debit_note_no}`, 'success');
-  _purchaseReturnContext = null;
-  const invInp = document.getElementById('pret-invref');
-  if (invInp) invInp.value = '';
-  const infoBox = document.getElementById('pret-bill-info');
-  if (infoBox) infoBox.style.display = 'none';
-  const itemsDiv = document.getElementById('pret-items-div');
-  if (itemsDiv) itemsDiv.innerHTML = '<div style="text-align:center;padding:24px;color:var(--gray);">Fetch an original purchase invoice to view returnable items</div>';
-  const amtEl = document.getElementById('pret-amount');
-  if (amtEl) amtEl.textContent = '₹0.00';
+  clearPurchaseReturnForm(true);
 
   loadPurchaseReturnsHistory();
   loadAllProducts();
@@ -8379,7 +9011,7 @@ async function loadPurchaseReturnsHistory() {
   if (!div) return;
   const res = await api('GET', '/api/purchases/returns');
   if (!res.ok) return;
-  const list = res.data.returns || [];
+  const list = res.data.purchase_returns || res.data.returns || [];
 
   if (!list.length) {
     div.innerHTML = '<div class="empty-state"><div class="empty-icon">📤</div><div class="empty-text">No debit notes issued yet</div></div>';
@@ -8396,15 +9028,20 @@ async function loadPurchaseReturnsHistory() {
         <span style="font-size:13px;font-weight:800;color:#0284c7;">${fmt(dn.total_amount)}</span>
       </div>
       <div style="display:flex;justify-content:space-between;font-size:11px;color:#475569;margin-bottom:8px;">
-        <span>Supplier: <b>${dn.supplier_name}</b></span>
+        <span>Supplier: <b>${escapeHtml(dn.supplier_name||'')}</b></span>
         <span>Date: ${dn.return_date}</span>
       </div>
       <div style="display:flex;justify-content:space-between;align-items:center;font-size:11px;border-top:1px solid #f0f9ff;padding-top:6px;">
-        <span style="color:var(--gray);">Reason: ${dn.reason || 'Goods Return'} (${dn.refund_mode})</span>
+        <span style="color:var(--gray);">Reason: ${escapeHtml(dn.reason || 'Goods Return')} (${escapeHtml(dn.refund_mode||'')})</span>
         <span style="font-size:10px;background:#e0f2fe;color:#0369a1;padding:2px 8px;border-radius:10px;font-weight:700;">ITC Reversed</span>
       </div>
     </div>
   `).join('');
+}
+
+function exportPurchaseReturnsCSV() {
+  window.location.href = '/api/purchases/returns/export/excel';
+  toast('📊 Downloading Debit Notes Excel...');
 }
 
 async function printCreditNoteDirect(cnNo) {
@@ -8666,9 +9303,7 @@ function downloadGSTR1PortalJSON() {
 }
 
 function downloadGSTR3BCSV() {
-  const month = document.getElementById('gstMonth')?.value || new Date().toISOString().slice(0, 7);
-  toast('⏳ Exporting GSTR-3B Summary CSV...');
-  window.location.href = `/api/gst/return-center/export/gstr3b-csv?month=${month}`;
+  downloadGSTExcel();
 }
 
 async function loadTaxRulesUI() {
@@ -8802,16 +9437,7 @@ async function loadGSTReport() {
 }
 
 function exportGSTReport() {
-  if(!_lastGSTData){toast('Please load a month first','error');return;}
-  const month=document.getElementById('gstMonth').value||'report';
-  const {sales,purchases}=_lastGSTData;
-  let csv='GSTR-1 Sales\nBill ID,Customer,GSTIN,Date,Subtotal,CGST,SGST,IGST,Total\n';
-  (sales||[]).forEach(s=>csv+=`${s.bill_id},${s.customer_name},${s.customer_gstin||''},${s.sale_date},${s.subtotal||0},${s.cgst_amount||0},${s.sgst_amount||0},${s.igst_amount||0},${s.total_amount}
-`);
-  csv+='\nGSTR-2 Purchases\nInv No,Supplier,GSTIN,Date,Subtotal,CGST,SGST,IGST,Total\n';
-  (purchases||[]).forEach(p=>csv+=`${p.invoice_no||p.purchase_id},${p.supplier_name||''},${p.supplier_gstin||''},${p.bill_date},${p.subtotal||0},${p.cgst_amount||0},${p.sgst_amount||0},${p.igst_amount||0},${p.total_amount}
-`);
-  const blob=new Blob([csv],{type:'text/csv'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`GST_Report_${month}.csv`;a.click();toast('📊 Exported!');
+  downloadGSTExcel();
 }
 
 // ═══════════════════════════════════════════════
@@ -8837,7 +9463,9 @@ function renderGSTDrilldownCards(rates) {
   if (!container) return;
 
   const rateConfigs = [
+    { key: '28', label: '28% GST Slab', sub: '14% CGST + 14% SGST (Local) / 28% IGST', color: '#dc2626', bg: '#fef2f2', border: '#fecaca' },
     { key: '18', label: '18% GST Slab', sub: '9% CGST + 9% SGST (Local) / 18% IGST', color: '#4f46e5', bg: '#eef2ff', border: '#c7d2fe' },
+    { key: '12', label: '12% GST Slab', sub: '6% CGST + 6% SGST (Local) / 12% IGST', color: '#d97706', bg: '#fffbeb', border: '#fde68a' },
     { key: '5', label: '5% GST Slab', sub: '2.5% CGST + 2.5% SGST (Local) / 5% IGST', color: '#0284c7', bg: '#f0f9ff', border: '#bae6fd' },
     { key: '0', label: '0% / Exempt Slab', sub: 'Exempted & Nil-rated Supplies', color: '#475569', bg: '#f8fafc', border: '#e2e8f0' }
   ];
@@ -9001,38 +9629,7 @@ function toggleDrilldownItems(idx) {
 }
 
 function exportGSTDrilldownCSV() {
-  if (!_lastGSTDrilldown || !_lastGSTDrilldown.rates) {
-    toast('No GST drilldown data loaded!', 'error');
-    return;
-  }
-  const month = _lastGSTDrilldown.month || 'report';
-  let csv = 'Type,Bill ID,Date,Party Name,Party GSTIN,Supply Type,Rate Slab,Product,HSN,Qty,Unit,Rate,Taxable,GST Pct,CGST,SGST,IGST,Line Total\n';
-
-  Object.keys(_lastGSTDrilldown.rates).forEach(rateKey => {
-    const rData = _lastGSTDrilldown.rates[rateKey];
-    (rData.invoices || []).forEach(inv => {
-      const supply = inv.is_interstate ? 'Inter-State' : 'Local';
-      (inv.items || []).forEach(it => {
-        const lineTax = (it.amount * (it.gst_pct || 0) / 100);
-        const cgst = inv.is_interstate ? 0 : (lineTax / 2).toFixed(2);
-        const sgst = inv.is_interstate ? 0 : (lineTax / 2).toFixed(2);
-        const igst = inv.is_interstate ? lineTax.toFixed(2) : 0;
-        const total = (it.amount + lineTax).toFixed(2);
-        const partySafe = `"${(inv.party || '').replace(/"/g, '""')}"`;
-        const prodSafe = `"${(it.product || '').replace(/"/g, '""')}"`;
-
-        csv += `${inv.type},${inv.bill_id},${inv.date},${partySafe},${inv.gstin || ''},${supply},${rateKey}%,${prodSafe},${it.hsn || ''},${it.qty},${it.unit || 'Pc'},${it.rate},${it.amount},${it.gst_pct}%,${cgst},${sgst},${igst},${total}\n`;
-      });
-    });
-  });
-
-  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = `GST_Rate_Drilldown_${month}.csv`;
-  a.click();
-  URL.revokeObjectURL(a.href);
-  toast('📊 Drilldown CSV exported successfully!');
+  downloadGSTExcel();
 }
 
 // ═══════════════════════════════════════════════
@@ -9089,33 +9686,22 @@ async function viewPurchase(purId) {
   if(p.notes){document.getElementById('pvNotes').style.display='';document.getElementById('pvNotes').textContent='📝 '+p.notes;}
   else document.getElementById('pvNotes').style.display='none';
   document.getElementById('pvCSVBtn').onclick=()=>downloadPurchaseCSV(purId,p.purchase_id,p.supplier_name);
+  const pvExcelBtn = document.getElementById('pvExcelBtn');
+  if (pvExcelBtn) pvExcelBtn.onclick = () => window.location.href = `/api/purchases/${purId}/export/excel`;
   const pvWABtn=document.getElementById('pvWABtn');
   const sup=allSuppliers.find(s=>s.name===p.supplier_name);
   if(sup&&sup.phone){pvWABtn.style.display='';pvWABtn.onclick=()=>orderOnWA(sup.id);}else pvWABtn.style.display='none';
 }
 function downloadPurchaseCSV(purId,billId,supplierName) {
-  if(!_currentPurchaseData||_currentPurchaseData.purchase_id!==billId){viewPurchase(purId);return;}
-  const p=_currentPurchaseData;
-  let csv=`Purchase Bill - ${p.purchase_id}
-Supplier: ${p.supplier_name}
-Date: ${p.bill_date}
-
-Product,HSN,Qty,Rate,GST%,Amount
-`;
-  (p.items||[]).forEach(it=>csv+=`${it.product},${it.hsn_code||''},${it.qty},${it.unit||'Pcs'},${it.buy_price||it.price||0},${it.gst_pct||0},${parseFloat(it.amount||0)*9/118},${parseFloat(it.amount||0)*9/118},${it.amount}
-`);
-  csv+=`
-Subtotal,${p.subtotal||0}
-CGST @9%,${p.cgst_amount||0}
-SGST @9%,${p.sgst_amount||0}
-Total,${p.total_amount}
-`;
-  const blob=new Blob([csv],{type:'text/csv'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`Purchase_${billId}.csv`;a.click();toast('📊 Downloaded!');
+  const pId = purId || (_currentPurchaseData ? (_currentPurchaseData.id || _currentPurchaseData.purchase_id) : '');
+  if (!pId) { toast('Purchase ID missing', 'error'); return; }
+  window.location.href = `/api/purchases/${encodeURIComponent(pId)}/export/excel`;
+  toast('📊 Downloading Purchase Bill Excel...');
 }
 
-let _currentSupplierBills=null,_currentSupplierName='';
+let _currentSupplierBills=null,_currentSupplierName='',_currentSupplierId=null;
 async function viewSupplierBills(supId,supName) {
-  _currentSupplierName=supName; openModal('supplierBillsModal');
+  _currentSupplierId=supId; _currentSupplierName=supName; openModal('supplierBillsModal');
   document.getElementById('sbTitle').textContent=`📦 ${supName}`;
   document.getElementById('sbTbody').innerHTML='<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--gray);">⏳ Loading...</td></tr>';
   const r=await api('GET',`/api/suppliers/${supId}/purchases`);
@@ -9125,21 +9711,33 @@ async function viewSupplierBills(supId,supName) {
   document.getElementById('sbSummary').innerHTML=`
     <div style="background:#f3f0ff;border-radius:10px;padding:12px;text-align:center;border:1.5px solid #e9d5ff;"><div style="font-size:10px;color:#6d28d9;font-weight:700;letter-spacing:1px;">TOTAL PURCHASED</div><div style="font-size:20px;font-weight:800;color:#7c3aed;">${fmt(total_amount||0)}</div></div>
     <div style="background:#f0fdf4;border-radius:10px;padding:12px;text-align:center;border:1.5px solid #bbf7d0;"><div style="font-size:10px;color:#15803d;font-weight:700;letter-spacing:1px;">TOTAL BILLS</div><div style="font-size:20px;font-weight:800;color:#16a34a;">${bill_count||0}</div></div>`;
-  document.getElementById('sbTbody').innerHTML=(purchases||[]).length?(purchases||[]).map(p=>`<tr><td><code style="font-size:11px;color:#7c3aed;font-weight:700;">${p.purchase_id}</code></td><td style="font-size:12px;color:var(--gray);">${p.bill_date}</td><td style="font-size:12px;">${p.invoice_no||'-'}</td><td><b>${fmt(p.total_amount)}</b></td><td><button onclick="viewPurchase(${p.id});closeModal('supplierBillsModal');" style="padding:4px 10px;background:#7c3aed;color:white;border:none;border-radius:6px;cursor:pointer;font-size:11px;margin-right:4px;">👁 View</button><button onclick="deleteSupplierBill(${p.id})" style="padding:4px 8px;background:#fee2e2;color:#dc2626;border:1px solid #fecaca;border-radius:6px;cursor:pointer;font-size:11px;">🗑️</button></td></tr>`).join(''):'<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--gray);">No bills found</td></tr>';
+  document.getElementById('sbTbody').innerHTML=(purchases||[]).length?(purchases||[]).map(p=>`<tr>
+    <td><code style="font-size:11px;color:#7c3aed;font-weight:700;">${p.purchase_id}</code></td>
+    <td style="font-size:12px;color:var(--gray);">${p.bill_date}</td>
+    <td style="font-size:12px;">${p.invoice_no||'-'}</td>
+    <td><b>${fmt(p.total_amount)}</b></td>
+    <td>
+      <button onclick="viewPurchase(${p.id});closeModal('supplierBillsModal');" style="padding:4px 8px;background:#7c3aed;color:white;border:none;border-radius:6px;cursor:pointer;font-size:11px;margin-right:3px;">👁 View</button>
+      <button onclick="window.location.href='/api/purchases/${p.id}/export/excel';" style="padding:4px 8px;background:#16a34a;color:white;border:none;border-radius:6px;cursor:pointer;font-size:11px;margin-right:3px;" title="Export Bill to Excel">📊 Excel</button>
+      <button onclick="deleteSupplierBill(${p.id})" style="padding:4px 8px;background:#fee2e2;color:#dc2626;border:1px solid #fecaca;border-radius:6px;cursor:pointer;font-size:11px;">🗑️</button>
+    </td>
+  </tr>`).join(''):'<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--gray);">No bills found</td></tr>';
 }
-function exportSupplierCSV() {
-  if(!_currentSupplierBills) return;
-  const {purchases,total_amount}=_currentSupplierBills;
-  let csv=`Supplier Bills - ${_currentSupplierName}
 
-Bill ID,Date,Invoice No,Amount
-`;
-  (purchases||[]).forEach(p=>csv+=`${p.purchase_id},${p.bill_date},${p.invoice_no||''},${p.total_amount}
-`);
-  csv+=`
-TOTAL,${total_amount}
-`;
-  const blob=new Blob([csv],{type:'text/csv'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`Supplier_${_currentSupplierName.replace(/\s+/g,'_')}_Bills.csv`;a.click();toast('📊 Downloaded!');
+function exportSupplierExcel() {
+  if(!_currentSupplierId) return;
+  window.location.href = `/api/suppliers/${_currentSupplierId}/export/excel`;
+  toast('📊 Downloading Supplier Ledger Excel...');
+}
+
+function exportSupplierCSV() {
+  exportSupplierExcel();
+}
+
+function downloadGSTExcel() {
+  const m = document.getElementById('gstMonth')?.value || '';
+  window.location.href = `/api/gst/export/excel?month=${encodeURIComponent(m)}`;
+  toast('📊 Downloading CA-Audit GST Excel Workbook...');
 }
 
 // ═══════════════════════════════════════════════
@@ -9199,23 +9797,17 @@ Thank you! 🙏`;
   const phone=(cust.phone||'').replace(/[^0-9]/g,'');
   window.open(phone.length>=10?`https://wa.me/91${phone.slice(-10)}?text=${encodeURIComponent(msg)}`:`https://wa.me/?text=${encodeURIComponent(msg)}`,'_blank');
 }
-function exportLedgerCSV() {
-  if(!_currentLedgerData) return;
-  const cust=allCustomers.find(c=>c.id===_currentLedgerCustId)||{};
-  const {sales,total_billed,total_paid,balance}=_currentLedgerData;
-  let csv=`Customer Ledger - ${cust.name||''}
-Phone: ${cust.phone||''}
+function exportCustomerLedgerExcel() {
+  if (!_currentLedgerCustId) {
+    toast('No customer selected', 'error');
+    return;
+  }
+  toast('📊 Downloading Customer Ledger Excel...');
+  window.location.href = `/api/customers/${_currentLedgerCustId}/export/excel`;
+}
 
-Bill ID,Date,Total,Paid,Pending,Mode,Status
-`;
-  (sales||[]).forEach(s=>{const p=Math.max(0,s.total_amount-s.paid_amount);csv+=`${s.bill_id},${s.sale_date},${s.total_amount},${s.paid_amount},${p},${s.payment_mode||''},${s.payment_status}
-`;});
-  csv+=`
-TOTAL BILLED,${total_billed}
-TOTAL PAID,${total_paid}
-BALANCE DUE,${balance}
-`;
-  const blob=new Blob([csv],{type:'text/csv'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`Ledger_${(cust.name||'customer').replace(/\s+/g,'_')}.csv`;a.click();toast('📊 Ledger exported!');
+function exportLedgerCSV() {
+  exportCustomerLedgerExcel();
 }
 async function recordLedgerPayment() {
   const amt=parseFloat(document.getElementById('ledgerPayAmt').value);
@@ -9387,17 +9979,25 @@ async function shareWhatsApp(billId, custName, phone, total, status, date, paidA
 
 <!-- Floating Robot Button -->
 <button id="chatbotBtn" onclick="toggleChatbot()" style="
-  position:fixed; bottom:90px; right:20px; z-index:500;
-  width:56px; height:56px; border-radius:50%;
+  position:fixed; bottom:24px; right:24px; z-index:500;
+  width:50px; height:50px; border-radius:50%;
   background:linear-gradient(135deg,#6d28d9,#a855f7);
-  border:none; cursor:pointer; box-shadow:0 4px 20px rgba(124,58,237,0.5);
+  border:none; cursor:pointer; box-shadow:0 4px 18px rgba(124,58,237,0.45);
   display:flex; align-items:center; justify-content:center;
-  font-size:24px; transition:all 0.3s;
-  animation: botPulse 2s infinite;">
+  font-size:22px; transition:all 0.3s;
+  animation: botPulse 2s infinite;" title="BillZen AI Assistant">
   🤖
 </button>
 
 <style>
+@media(max-width:768px){
+  #chatbotBtn{bottom:76px !important;right:16px !important;width:46px !important;height:46px !important;font-size:20px !important;}
+  #chatbotWindow{bottom:130px !important;right:12px !important;width:calc(100vw - 24px) !important;max-height:80vh !important;}
+}
+@media(min-width:769px){
+  #chatbotBtn{bottom:24px !important;right:24px !important;}
+  #chatbotWindow{bottom:84px !important;right:24px !important;}
+}
 @keyframes botPulse {
   0%,100%{box-shadow:0 4px 20px rgba(124,58,237,0.5);}
   50%{box-shadow:0 4px 30px rgba(124,58,237,0.8);}
@@ -9416,7 +10016,7 @@ async function shareWhatsApp(billId, custName, phone, total, status, date, paidA
 
 <!-- Chatbot Window -->
 <div id="chatbotWindow" style="
-  display:none; position:fixed; bottom:160px; right:20px; z-index:499;
+  display:none; position:fixed; bottom:84px; right:24px; z-index:499;
   width:360px; height:500px; background:white;
   border-radius:20px; box-shadow:0 10px 40px rgba(0,0,0,0.2);
   flex-direction:column; overflow:hidden;

@@ -1,7 +1,30 @@
+# Local Environment & Secrets
 .env
+.env.*
 .secret_key
-*.bak
+*.pem
+*.key
+
+# Databases & Backups
+*.db
+*.sqlite
+*.sqlite3
+billzen.db
+billzen_backup_*.db
 test_*.db
+*.bak
+backups/
+
+# Desktop shortcuts & OS files
+*.lnk
+Thumbs.db
+.DS_Store
+
+# Logs
+*.log
+
+# Python Cache & Testing
 __pycache__/
 *.py[cod]
 .pytest_cache/
+.coverage

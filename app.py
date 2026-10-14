@@ -2,8 +2,8 @@ from flask import Flask, request, jsonify, session, redirect, url_for, render_te
 from werkzeug.security import generate_password_hash, check_password_hash
 from functools import wraps
 from datetime import date, datetime, timedelta
-from collections import defaultdict, deque
-import sqlite3, os, uuid, secrets, time
+from collections import defaultdict, deque, Counter
+import sqlite3, os, sys, uuid, secrets, time
 
 app = Flask(__name__)
 
@@ -83,8 +83,182 @@ def query(sql, args=(), one=False):
     finally:
         db.close()
 
+REQUIRED_CORE_TABLES = frozenset({
+    'users', 'shops', 'units', 'categories', 'products',
+    'customers', 'suppliers', 'sales', 'sale_items',
+    'purchases', 'purchase_items', 'stock_adjustments',
+    'customer_payments', 'quotations', 'quotation_items',
+    'delivery_challans', 'delivery_challan_items',
+    'returns', 'return_items',
+    'sales_returns', 'sales_return_items',
+    'purchase_returns', 'purchase_return_items',
+    'tax_rules', 'shop_ledger_mappings'
+})
+
+def bootstrap_admin_account(db):
+    """
+    Safely creates a root Master Admin from environment credentials during initial setup.
+    - Runs only if BOTH username and password are provided in the environment.
+    - Requires password length >= 8 characters.
+    - Strictly avoids elevating existing ordinary users to prevent account takeover.
+    """
+    raw_username = (os.environ.get('BILLZEN_BOOTSTRAP_ADMIN_USERNAME') or '').strip()
+    raw_password = (os.environ.get('BILLZEN_BOOTSTRAP_ADMIN_PASSWORD') or '').strip()
+    raw_name = (os.environ.get('BILLZEN_BOOTSTRAP_ADMIN_NAME') or 'Administrator').strip()
+
+    if not raw_username or not raw_password:
+        return
+
+    if len(raw_password) < 8:
+        import sys
+        print(f"[SECURITY WARNING] BILLZEN_BOOTSTRAP_ADMIN_PASSWORD must be at least 8 characters. Bootstrap skipped.", file=sys.stderr)
+        return
+
+    cur = db.execute("SELECT id, is_master_admin FROM users WHERE username = ?", (raw_username,))
+    existing = cur.fetchone()
+
+    if existing:
+        if not existing['is_master_admin']:
+            import sys
+            print(f"[SECURITY WARNING] User '@{raw_username}' already exists as an ordinary account. Automatic elevation blocked.", file=sys.stderr)
+        return
+
+    from werkzeug.security import generate_password_hash
+    cur = db.execute(
+        """INSERT INTO users (name, username, password, plain_password, role, is_master_admin, plan_status, subscription_ends_at)
+           VALUES (?, ?, ?, '', 'admin', 1, 'lifetime', '2099-12-31 23:59:59')""",
+        (raw_name, raw_username, generate_password_hash(raw_password))
+    )
+    new_uid = cur.lastrowid
+    db.execute(
+        """INSERT INTO shops (user_id, name, phone, gstin, state, state_code)
+           VALUES (?, ?, '', '', 'DELHI', '07')""",
+        (new_uid, f"{raw_name} HQ")
+    )
+    db.commit()
+    print(f"[BOOTSTRAP] Dedicated Master Admin '@{raw_username}' created successfully.")
+
+class _DatabaseInitLock:
+    """
+    Cross-process file lock ensuring single-execution of database initialization
+    when multiple Gunicorn workers start simultaneously on a fresh database.
+    Works across Linux/macOS (fcntl) and Windows (msvcrt) using standard libraries.
+    """
+    def __init__(self, lock_file, timeout=60):
+        self.lock_file = lock_file
+        self.timeout = timeout
+        self.fd = None
+
+    def __enter__(self):
+        import time
+        start = time.time()
+        self.fd = os.open(self.lock_file, os.O_CREAT | os.O_RDWR)
+        if os.path.getsize(self.lock_file) == 0:
+            try:
+                os.write(self.fd, b'\x00')
+            except Exception:
+                pass
+        while True:
+            try:
+                os.lseek(self.fd, 0, os.SEEK_SET)
+                if sys.platform == 'win32':
+                    import msvcrt
+                    msvcrt.locking(self.fd, msvcrt.LK_NBLCK, 1)
+                else:
+                    import fcntl
+                    fcntl.flock(self.fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                return self
+            except (BlockingIOError, OSError, PermissionError):
+                if time.time() - start >= self.timeout:
+                    raise TimeoutError(f"Timed out waiting for database initialization lock on {self.lock_file}")
+                time.sleep(0.05)
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self.fd is not None:
+            try:
+                os.lseek(self.fd, 0, os.SEEK_SET)
+                if sys.platform == 'win32':
+                    import msvcrt
+                    msvcrt.locking(self.fd, msvcrt.LK_UNLCK, 1)
+                else:
+                    import fcntl
+                    fcntl.flock(self.fd, fcntl.LOCK_UN)
+            except Exception:
+                pass
+            try:
+                os.close(self.fd)
+            except Exception:
+                pass
+            self.fd = None
+
+def _check_tables_read_only(db_path):
+    if not os.path.exists(db_path):
+        return set()
+    try:
+        conn = sqlite3.connect(f"file:{os.path.abspath(db_path)}?mode=ro", uri=True)
+        cur = conn.cursor()
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        return set(r[0] for r in cur.fetchall())
+    except Exception:
+        return set()
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+def ensure_database_ready():
+    """
+    Safely verifies database readiness on application startup.
+    - Healthy existing database: Verified in read-only mode, ZERO DDL/mutations/locks.
+    - Fresh database: Atomically serialized across Gunicorn workers via cross-process lock.
+      Initialized once with core tables, tax rules, indexes, and bootstrap admin.
+    - Incomplete/corrupted database: Halts startup immediately with a clear error.
+    """
+    db_path = DATABASE
+
+    # 1. Fast-path check for healthy existing database:
+    # Zero locks, zero writes, zero schema alterations.
+    existing_tables = _check_tables_read_only(db_path)
+    if REQUIRED_CORE_TABLES.issubset(existing_tables):
+        return
+
+    # If partial tables already exist without being fresh or complete:
+    if len(existing_tables) > 0:
+        import sys
+        missing = REQUIRED_CORE_TABLES - existing_tables
+        err = f"FATAL: Database at '{db_path}' is incomplete or corrupt. Missing required tables: {sorted(missing)}. Halting boot to protect data."
+        print(f"\n{'!'*60}\n{err}\n{'!'*60}\n", file=sys.stderr)
+        raise RuntimeError(err)
+
+    # 2. Fresh database: Serialize initialization across all worker processes
+    lock_path = db_path + ".init.lock"
+    with _DatabaseInitLock(lock_path, timeout=60):
+        # Double-check inside the lock: Another worker may have completed setup
+        tables_after_lock = _check_tables_read_only(db_path)
+        if REQUIRED_CORE_TABLES.issubset(tables_after_lock):
+            return
+
+        if len(tables_after_lock) > 0:
+            import sys
+            missing = REQUIRED_CORE_TABLES - tables_after_lock
+            err = f"FATAL: Database at '{db_path}' is incomplete or corrupt. Missing required tables: {sorted(missing)}. Halting boot to protect data."
+            print(f"\n{'!'*60}\n{err}\n{'!'*60}\n", file=sys.stderr)
+            raise RuntimeError(err)
+
+        # Proceed with clean initialization
+        init_db()
+
 def init_db():
     db = get_db()
+    db.execute("PRAGMA busy_timeout = 30000")
+    cur = db.cursor()
+    cur.execute("SELECT name FROM sqlite_master WHERE type='table'")
+    current_tables = set(r[0] for r in cur.fetchall())
+    if REQUIRED_CORE_TABLES.issubset(current_tables):
+        db.close()
+        return
+
     db.executescript("""
     CREATE TABLE IF NOT EXISTS users (
         id                   INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -686,19 +860,12 @@ def migrate_db():
             db.commit()
     except Exception:
         pass
-    master_uname = os.environ.get('BILLZEN_BOOTSTRAP_ADMIN_USERNAME', 'admin@billzen')
-    try:
-        db.execute("UPDATE users SET is_master_admin = 1, plan_status = 'lifetime' WHERE username = ?", (master_uname,))
-        db.commit()
-    except Exception:
-        pass
+    # Safe bootstrap admin: Only creates a new admin if credentials provided.
+    # Never automatically promotes an existing ordinary user.
+    bootstrap_admin_account(db)
 
-    # Wipe out any legacy cleartext passwords stored in users
-    try:
-        db.execute("UPDATE users SET plain_password = '' WHERE plain_password != ''")
-        db.commit()
-    except Exception:
-        pass
+    # Retain client passwords managed by Master Admin for owner retrieval
+    pass
 
     # Add Desktop Connector columns to shops
     for col, col_def in [
@@ -767,7 +934,7 @@ def api_register():
         return jsonify({"success": False, "error": "Username already exists"}), 409
 
     trial_expiry = (datetime.now() + timedelta(days=7)).strftime('%Y-%m-%d %H:%M:%S')
-    cur = db.execute("INSERT INTO users (name, username, password, role, plan_status, trial_ends_at, is_master_admin) VALUES (?, ?, ?, 'admin', 'trial', ?, 0)",
+    cur = db.execute("INSERT INTO users (name, username, password, plain_password, role, plan_status, trial_ends_at, is_master_admin) VALUES (?, ?, ?, '', 'admin', 'trial', ?, 0)",
                      (name, username, generate_password_hash(password), trial_expiry))
     user_id = cur.lastrowid
 
@@ -812,6 +979,13 @@ def api_login():
     if not user or not check_password_hash(user['password'], d.get('password','')):
         attempts.append(now)
         return jsonify({"success": False, "error": "Invalid credentials"}), 401
+
+    # Check if this shop account or its owner is suspended by Master Admin
+    owner_id = user.get('admin_id') or user['id']
+    owner = query("SELECT plan_status FROM users WHERE id=?", (owner_id,), one=True) or {}
+    if owner.get('plan_status') in ('suspended', 'stopped') and not user.get('is_master_admin'):
+        return jsonify({"success": False, "error": "This shop subscription has been stopped / suspended by Master Admin. Please contact support."}), 403
+
     _login_attempts.pop(key, None)
     session.clear()
     # Staff work on their shop owner's data; login_id keeps who actually signed in.
@@ -842,6 +1016,8 @@ def get_user_plan_info(uid):
         return get_user_plan_info(u['admin_id'])
     if u.get('is_master_admin'):
         return {"status": "lifetime", "days_left": 9999, "is_master": True, "label": "👑 Master Admin"}
+    if u.get('plan_status') in ('suspended', 'stopped'):
+        return {"status": "suspended", "days_left": 0, "expires_at": u.get('subscription_ends_at') or '', "is_master": False, "label": "⛔ Suspended"}
     now = datetime.now()
     sub_end = (u.get('subscription_ends_at') or '').strip()
     if sub_end:
@@ -928,6 +1104,41 @@ def save_shop():
 
 
 # ─────────────────────────────────────────────────────────────
+#  QUANTITY PRECISION & UNIT ENFORCEMENT
+# ─────────────────────────────────────────────────────────────
+DISCRETE_UNITS = {
+    'pcs', 'pc', 'piece', 'pieces', 'box', 'boxes', 'pack', 'packs',
+    'nos', 'no', 'number', 'numbers', 'set', 'sets', 'pair', 'pairs',
+    'dozen', 'dzn', 'carton', 'ctn', 'bottle', 'bottles', 'bag', 'bags', 'unit', 'units'
+}
+
+def is_discrete_unit(unit_str):
+    if not unit_str:
+        return True
+    return unit_str.strip().lower() in DISCRETE_UNITS
+
+def validate_quantity_precision(qty, unit_str):
+    """
+    Validates that discrete units (Pcs/Box/Set/etc.) do not receive arbitrary fractional quantities (e.g. 0.37).
+    Allows valid decimals for continuous units (Kg/Ltr/Meter/etc.).
+    Returns (is_valid, cleaned_qty, error_msg)
+    """
+    try:
+        q = float(qty)
+    except (ValueError, TypeError):
+        return False, 0.0, "Invalid quantity value"
+    if q <= 0:
+        return False, 0.0, "Quantity must be greater than zero"
+
+    if is_discrete_unit(unit_str):
+        if abs(q - round(q)) > 1e-4:
+            return False, q, f"Unit '{unit_str or 'Pcs'}' is countable and does not accept fractional quantities ({qty}). Please enter a whole number."
+        return True, float(round(q)), None
+    else:
+        return True, round(q, 3), None
+
+
+# ─────────────────────────────────────────────────────────────
 #  STOCK ADJUSTMENT
 # ─────────────────────────────────────────────────────────────
 @app.route('/api/stock/adjust', methods=['POST'])
@@ -936,23 +1147,38 @@ def stock_adjust():
     uid = get_uid()
     d   = request.get_json(silent=True) or {}
     prod_id = d.get('product_id')
-    qty     = float(d.get('qty', 0))
+    raw_qty = d.get('qty', 0)
     typ     = d.get('type', 'add')
     reason  = d.get('reason', '')
     notes   = d.get('notes', '')
-    if not prod_id or qty <= 0:
-        return jsonify({"success": False, "error": "Invalid data"}), 400
+    if not prod_id:
+        return jsonify({"success": False, "error": "Product is required"}), 400
     prod = query("SELECT * FROM products WHERE id=? AND user_id=?", (prod_id, uid), one=True)
     if not prod:
         return jsonify({"success": False, "error": "Product not found"}), 404
+
+    is_valid, qty, err = validate_quantity_precision(raw_qty, prod.get('unit'))
+    if not is_valid:
+        return jsonify({"success": False, "error": err}), 400
+
     db = get_db()
-    new_stock = prod['stock'] + qty if typ == 'add' else max(0, prod['stock'] - qty)
-    db.execute("UPDATE products SET stock=? WHERE id=? AND user_id=?", (new_stock, prod_id, uid))
-    db.execute("""INSERT INTO stock_adjustments (user_id,product_id,product_name,qty,type,reason,notes,created_at)
-        VALUES (?,?,?,?,?,?,?,datetime('now'))""",
-        (uid, prod_id, prod['name'], qty, typ, reason, notes))
-    db.commit()
-    return jsonify({"success": True, "new_stock": new_stock})
+    try:
+        new_stock = prod['stock'] + qty if typ == 'add' else max(0.0, prod['stock'] - qty)
+        if is_discrete_unit(prod.get('unit')):
+            new_stock = float(round(new_stock))
+        else:
+            new_stock = round(new_stock, 3)
+        db.execute("UPDATE products SET stock=? WHERE id=? AND user_id=?", (new_stock, prod_id, uid))
+        db.execute("""INSERT INTO stock_adjustments (user_id,product_id,product_name,qty,type,reason,notes,created_at)
+            VALUES (?,?,?,?,?,?,?,datetime('now'))""",
+            (uid, prod_id, prod['name'], qty, typ, reason, notes))
+        db.commit()
+        return jsonify({"success": True, "new_stock": new_stock})
+    except Exception as e:
+        db.rollback()
+        return jsonify({"success": False, "error": str(e)}), 500
+    finally:
+        db.close()
 
 @app.route('/api/stock/adjustments', methods=['GET'])
 @login_required
@@ -1023,17 +1249,30 @@ def create_return():
 #  SALES RETURNS (CREDIT NOTES) & PURCHASE RETURNS (DEBIT NOTES)
 # ─────────────────────────────────────────────────────────────
 
-@app.route('/api/sales/<bill_id>/return-context', methods=['GET'])
+# ─────────────────────────────────────────────────────────────
+#  SALES RETURNS (CREDIT NOTES) & PURCHASE RETURNS (DEBIT NOTES)
+# ─────────────────────────────────────────────────────────────
+
+@app.route('/api/sales/return-context', methods=['GET'])
+@app.route('/api/sales/<path:bill_id>/return-context', methods=['GET'])
 @login_required
-def get_sale_return_context(bill_id):
+def get_sale_return_context(bill_id=''):
     """
     Returns original sale transaction with line items and remaining returnable quantities.
-    Enables seamless 1-click 'Create Sales Return' with pre-filled context.
+    Supports path variable or query string parameter (?bill_id=... / ?ref=...).
     """
     uid = get_uid()
-    sale = query("SELECT * FROM sales WHERE bill_id=? AND user_id=? AND cancelled=0", (bill_id, uid), one=True)
+    ref = (bill_id or request.args.get('bill_id') or request.args.get('ref') or '').strip()
+    if not ref:
+        return jsonify({"success": False, "error": "Sales Bill ID is required"}), 400
+
+    sale = query("""
+        SELECT * FROM sales 
+        WHERE user_id=? AND cancelled=0 
+          AND (bill_id=? OR UPPER(TRIM(bill_id))=UPPER(TRIM(?)))
+    """, (uid, ref, ref), one=True)
     if not sale:
-        return jsonify({"success": False, "error": "Active sales invoice not found"}), 404
+        return jsonify({"success": False, "error": f"Active sales invoice '{ref}' not found"}), 404
 
     orig_items = rows("SELECT * FROM sale_items WHERE sale_id=?", (sale['id'],))
 
@@ -1056,12 +1295,18 @@ def get_sale_return_context(bill_id):
     for it in orig_items:
         sold_qty = float(it.get('qty', 0))
         already_ret = ret_map.get(it['id'], ret_map.get(it['product'], 0.0))
-        returnable = max(0.0, round(sold_qty - already_ret, 2))
+        unit = it.get('unit', 'Pcs')
+        returnable = max(0.0, round(sold_qty - already_ret, 3))
+        if is_discrete_unit(unit):
+            sold_qty = float(round(sold_qty))
+            already_ret = float(round(already_ret))
+            returnable = float(round(returnable))
+
         items_context.append({
             "original_item_id": it['id'],
             "product": it['product'],
             "hsn_code": it.get('hsn_code', ''),
-            "unit": it.get('unit', 'Pcs'),
+            "unit": unit,
             "sold_qty": sold_qty,
             "original_qty": sold_qty,
             "already_returned_qty": already_ret,
@@ -1082,16 +1327,27 @@ def get_sale_return_context(bill_id):
 def create_sales_return():
     """
     Creates a formal GST Credit Note for a Sales Return.
-    Enforces maximum returnable quantity, computes taxes, and restores inventory.
+    Enforces unit-aware quantity precision, maximum returnable quantity, computes taxes, and restores inventory.
     """
     uid = get_uid()
     d = request.get_json(silent=True) or {}
-    orig_bill_id = (d.get('original_bill_id') or '').strip()
+    orig_bill_id = (d.get('original_bill_id') or d.get('bill_id') or '').strip()
+    sale_id = d.get('sale_id')
     return_items_req = d.get('items', [])
-    if not orig_bill_id or not return_items_req:
+    if (not orig_bill_id and not sale_id) or not return_items_req:
         return jsonify({"success": False, "error": "Original invoice and return items required"}), 400
 
-    sale = query("SELECT * FROM sales WHERE bill_id=? AND user_id=? AND cancelled=0", (orig_bill_id, uid), one=True)
+    if orig_bill_id:
+        sale = query("""
+            SELECT * FROM sales 
+            WHERE user_id=? AND cancelled=0 
+              AND (bill_id=? OR UPPER(TRIM(bill_id))=UPPER(TRIM(?)))
+        """, (uid, orig_bill_id, orig_bill_id), one=True)
+    else:
+        sale = query("""
+            SELECT * FROM sales 
+            WHERE user_id=? AND cancelled=0 AND id=?
+        """, (uid, sale_id), one=True)
     if not sale:
         return jsonify({"success": False, "error": "Original invoice not found or cancelled"}), 404
 
@@ -1114,19 +1370,25 @@ def create_sales_return():
     tot_taxable = tot_cgst = tot_sgst = tot_igst = tot_amount = 0.0
 
     for req_it in return_items_req:
-        qty = float(req_it.get('qty') if req_it.get('qty') is not None else (req_it.get('return_qty') or 0))
-        if qty <= 0:
-            continue
+        raw_qty = req_it.get('qty') if req_it.get('qty') is not None else (req_it.get('return_qty') or 0)
         orig_id = req_it.get('original_item_id')
         orig_it = orig_items.get(orig_id)
         if not orig_it:
-            orig_it = next((v for v in orig_items.values() if v['product'] == req_it.get('product')), None)
+            req_pname = req_it.get('product') or req_it.get('product_name')
+            orig_it = next((v for v in orig_items.values() if v['product'] == req_pname), None)
             if not orig_it:
-                return jsonify({"success": False, "error": f"Item '{req_it.get('product')}' not found in original sale"}), 400
+                return jsonify({"success": False, "error": f"Item '{req_pname}' not found in original sale"}), 400
+
+        unit = orig_it.get('unit', 'Pcs')
+        is_valid, qty, err_msg = validate_quantity_precision(raw_qty, unit)
+        if not is_valid:
+            return jsonify({"success": False, "error": err_msg}), 400
+        if qty <= 0:
+            continue
 
         sold_q = float(orig_it.get('qty', 0))
         already_q = ret_map.get(orig_it['id'], 0.0)
-        max_returnable = max(0.0, round(sold_q - already_q, 2))
+        max_returnable = max(0.0, round(sold_q - already_q, 3))
         if qty > max_returnable + 0.001:
             return jsonify({
                 "success": False,
@@ -1141,7 +1403,7 @@ def create_sales_return():
             "original_item_id": orig_it['id'],
             "product": orig_it['product'],
             "hsn_code": orig_it.get('hsn_code', ''),
-            "unit": orig_it.get('unit', 'Pcs'),
+            "unit": unit,
             "qty": qty,
             "price": price,
             "taxable_amount": line_calc['taxable'],
@@ -1161,55 +1423,58 @@ def create_sales_return():
     if not valid_return_items:
         return jsonify({"success": False, "error": "No valid items selected for return"}), 400
 
+    # Guarantee globally unique Credit Note number across all tenants
     year = str(date.today().year)
-    last_cn = query("SELECT credit_note_no FROM sales_returns WHERE user_id=? AND credit_note_no LIKE ? ORDER BY id DESC LIMIT 1",
-                    (uid, f"CN-{year}-%"), one=True)
-    if last_cn:
-        try:
-            num = int(last_cn['credit_note_no'].split('-')[-1])
-            cn_no = f"CN-{year}-{(num + 1):04d}"
-        except Exception:
-            cn_no = f"CN-{year}-0001"
-    else:
-        cn_no = f"CN-{year}-0001"
+    existing_cns = {r['credit_note_no'] for r in rows("SELECT credit_note_no FROM sales_returns WHERE credit_note_no LIKE ?", (f"CN-{year}-%",))}
+    seq = 1
+    while f"CN-{year}-{seq:04d}" in existing_cns:
+        seq += 1
+    cn_no = f"CN-{year}-{seq:04d}"
 
     db = get_db()
-    db.execute("""
-        INSERT INTO sales_returns (
-            credit_note_no, user_id, original_sale_id, original_bill_id, original_sale_date,
-            customer_name, customer_phone, customer_gstin, place_of_supply, is_interstate,
-            return_date, reason, subtotal, cgst_amount, sgst_amount, igst_amount, total_amount,
-            refund_mode, notes
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (
-        cn_no, uid, sale['id'], sale['bill_id'], sale.get('sale_date', ''),
-        sale.get('customer_name', ''), sale.get('customer_phone', ''), sale.get('customer_gstin', ''),
-        sale.get('state_code', '07'), int(is_inter),
-        tx_date, d.get('reason', 'Goods Return'),
-        round(tot_taxable, 2), round(tot_cgst, 2), round(tot_sgst, 2), round(tot_igst, 2), round(tot_amount, 2),
-        d.get('refund_mode', 'Credit Note'), d.get('notes', '')
-    ))
-    cn_id = db.execute("SELECT last_insert_rowid() as id").fetchone()['id']
-
-    for it in valid_return_items:
+    try:
         db.execute("""
-            INSERT INTO sales_return_items (
-                return_id, original_item_id, product, hsn_code, qty, unit, price,
-                taxable_amount, gst_pct, cgst_amount, sgst_amount, igst_amount, total_amount
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO sales_returns (
+                credit_note_no, user_id, original_sale_id, original_bill_id, original_sale_date,
+                customer_name, customer_phone, customer_gstin, place_of_supply, is_interstate,
+                return_date, reason, subtotal, cgst_amount, sgst_amount, igst_amount, total_amount,
+                refund_mode, notes
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
-            cn_id, it['original_item_id'], it['product'], it['hsn_code'], it['qty'], it['unit'], it['price'],
-            it['taxable_amount'], it['gst_pct'], it['cgst_amount'], it['sgst_amount'], it['igst_amount'], it['total_amount']
+            cn_no, uid, sale['id'], sale['bill_id'], sale.get('sale_date', ''),
+            sale.get('customer_name', ''), sale.get('customer_phone', ''), sale.get('customer_gstin', ''),
+            sale.get('state_code', '07'), int(is_inter),
+            tx_date, d.get('reason', 'Goods Return'),
+            round(tot_taxable, 2), round(tot_cgst, 2), round(tot_sgst, 2), round(tot_igst, 2), round(tot_amount, 2),
+            d.get('refund_mode', 'Credit Note'), d.get('notes', '')
         ))
-        db.execute("UPDATE products SET stock = stock + ? WHERE user_id=? AND name=?", (it['qty'], uid, it['product']))
-        prod = query("SELECT id FROM products WHERE user_id=? AND name=?", (uid, it['product']), one=True)
-        if prod:
-            db.execute("""
-                INSERT INTO stock_adjustments (user_id, product_id, product_name, qty, type, reason, notes)
-                VALUES (?, ?, ?, ?, 'add', 'Sales Return', ?)
-            """, (uid, prod['id'], it['product'], it['qty'], f"Credit Note {cn_no} against {sale['bill_id']}"))
+        cn_id = db.execute("SELECT last_insert_rowid() as id").fetchone()['id']
 
-    db.commit()
+        for it in valid_return_items:
+            db.execute("""
+                INSERT INTO sales_return_items (
+                    return_id, original_item_id, product, hsn_code, qty, unit, price,
+                    taxable_amount, gst_pct, cgst_amount, sgst_amount, igst_amount, total_amount
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                cn_id, it['original_item_id'], it['product'], it['hsn_code'], it['qty'], it['unit'], it['price'],
+                it['taxable_amount'], it['gst_pct'], it['cgst_amount'], it['sgst_amount'], it['igst_amount'], it['total_amount']
+            ))
+            db.execute("UPDATE products SET stock = stock + ? WHERE user_id=? AND name=?", (it['qty'], uid, it['product']))
+            prod_row = db.execute("SELECT id FROM products WHERE user_id=? AND name=?", (uid, it['product'])).fetchone()
+            if prod_row:
+                db.execute("""
+                    INSERT INTO stock_adjustments (user_id, product_id, product_name, qty, type, reason, notes, created_at)
+                    VALUES (?, ?, ?, ?, 'add', 'Sales Return', ?, datetime('now'))
+                """, (uid, prod_row['id'], it['product'], it['qty'], f"Credit Note {cn_no} against {sale['bill_id']}"))
+
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        return jsonify({"success": False, "error": f"Failed to record sales return: {str(e)}"}), 500
+    finally:
+        db.close()
+
     return jsonify({
         "success": True,
         "credit_note_no": cn_no,
@@ -1237,7 +1502,7 @@ def get_sales_returns():
     returns = rows(sql, params)
     for r in returns:
         r['items'] = rows("SELECT * FROM sales_return_items WHERE return_id=?", (r['id'],))
-    return jsonify({"success": True, "sales_returns": returns})
+    return jsonify({"success": True, "sales_returns": returns, "returns": returns})
 
 
 @app.route('/api/sales/returns/<credit_note_no>', methods=['GET'])
@@ -1252,22 +1517,121 @@ def get_single_sales_return(credit_note_no):
     return jsonify({"success": True, "credit_note": dict(cn), "items": items, "shop": dict(shop)})
 
 
-# ── PURCHASE RETURNS (DEBIT NOTES) ──
-
-@app.route('/api/purchases/<purchase_ref>/return-context', methods=['GET'])
+@app.route('/api/sales/returns/export/csv', methods=['GET'])
 @login_required
-def get_purchase_return_context(purchase_ref):
+def export_sales_returns_csv():
+    import io, csv
+    from flask import Response
+    uid = get_uid()
+    sql = """
+        SELECT sr.credit_note_no, sr.original_bill_id, sr.original_sale_date, sr.return_date,
+               sr.customer_name, sr.customer_gstin, sr.reason, sr.refund_mode, sr.notes,
+               sri.product, sri.hsn_code, sri.qty, sri.unit, sri.price,
+               sri.taxable_amount, sri.gst_pct, sri.cgst_amount, sri.sgst_amount, sri.igst_amount, sri.total_amount
+        FROM sales_returns sr
+        JOIN sales_return_items sri ON sri.return_id = sr.id
+        WHERE sr.user_id = ?
+        ORDER BY sr.return_date DESC, sr.id DESC
+    """
+    records = rows(sql, (uid,))
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow([
+        'Credit Note No', 'Original Bill ID', 'Original Sale Date', 'Return Date',
+        'Customer Name', 'Customer GSTIN', 'Product', 'HSN/SAC', 'Returned Qty', 'Unit',
+        'Rate', 'Taxable Value', 'GST %', 'CGST', 'SGST', 'IGST', 'Total Return Amount',
+        'Return Reason', 'Settlement Mode', 'Notes'
+    ])
+    for r in records:
+        writer.writerow([
+            r['credit_note_no'], r['original_bill_id'], r['original_sale_date'], r['return_date'],
+            r['customer_name'], r['customer_gstin'], r['product'], r['hsn_code'], r['qty'], r['unit'],
+            r['price'], r['taxable_amount'], r['gst_pct'], r['cgst_amount'], r['sgst_amount'], r['igst_amount'], r['total_amount'],
+            r['reason'], r['refund_mode'], r['notes']
+        ])
+    
+    # Bottom Total Row as required by Part 9
+    tot_taxable = round(sum(float(r['taxable_amount'] or 0) for r in records), 2)
+    tot_cgst = round(sum(float(r['cgst_amount'] or 0) for r in records), 2)
+    tot_sgst = round(sum(float(r['sgst_amount'] or 0) for r in records), 2)
+    tot_igst = round(sum(float(r['igst_amount'] or 0) for r in records), 2)
+    tot_amount = round(sum(float(r['total_amount'] or 0) for r in records), 2)
+    distinct_cns = len({r['credit_note_no'] for r in records})
+
+    writer.writerow([])
+    writer.writerow([
+        f'TOTAL CREDIT NOTES ({distinct_cns})', '', '', '', '', '', '', '', '', '',
+        '', tot_taxable, '', tot_cgst, tot_sgst, tot_igst, tot_amount, '', '', ''
+    ])
+    writer.writerow([])
+    writer.writerow(['TOTAL CREDIT NOTES', distinct_cns])
+    writer.writerow(['TOTAL TAXABLE RETURN', tot_taxable])
+    writer.writerow(['TOTAL CGST', tot_cgst])
+    writer.writerow(['TOTAL SGST', tot_sgst])
+    writer.writerow(['TOTAL IGST', tot_igst])
+    writer.writerow(['TOTAL CREDIT NOTE VALUE', tot_amount])
+
+    return Response(
+        "\ufeff" + output.getvalue(),
+        mimetype='text/csv; charset=utf-8',
+        headers={"Content-Disposition": f"attachment; filename=Sales_Returns_CreditNotes_{date.today().strftime('%Y%m%d')}.csv"}
+    )
+
+
+@app.route('/api/sales/returns/export/excel', methods=['GET'])
+@login_required
+def export_sales_returns_excel():
+    import excel_engine
+    from flask import send_file
+    uid = get_uid()
+    sql = """
+        SELECT sr.credit_note_no, sr.original_bill_id, sr.original_sale_date, sr.return_date,
+               sr.customer_name, sr.customer_gstin, sr.reason, sr.refund_mode, sr.notes,
+               sri.product, sri.hsn_code, sri.qty, sri.unit, sri.price,
+               sri.taxable_amount, sri.gst_pct, sri.cgst_amount, sri.sgst_amount, sri.igst_amount, sri.total_amount
+        FROM sales_returns sr
+        JOIN sales_return_items sri ON sri.return_id = sr.id
+        WHERE sr.user_id = ?
+        ORDER BY sr.return_date DESC, sr.id DESC
+    """
+    records = rows(sql, (uid,))
+    shop = query("SELECT * FROM shops WHERE user_id=?", (uid,), one=True) or {}
+    bio = excel_engine.generate_credit_notes_workbook(dict(shop), records)
+    filename = f"Sales_Returns_CreditNotes_{date.today().strftime('%Y%m%d')}.xlsx"
+    return send_file(
+        bio,
+        as_attachment=True,
+        download_name=filename,
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    )
+
+
+# ─────────────────────────────────────────────────────────────
+#  PURCHASE RETURNS (DEBIT NOTES)
+# ─────────────────────────────────────────────────────────────
+
+@app.route('/api/purchases/return-context', methods=['GET'])
+@app.route('/api/purchases/<path:purchase_ref>/return-context', methods=['GET'])
+@login_required
+def get_purchase_return_context(purchase_ref=''):
     """
     Returns original purchase invoice with line items and remaining returnable quantities.
-    Enables seamless 1-click 'Create Purchase Return' with pre-filled context.
+    Supports internal Purchase ID (P...) or Supplier Invoice No (e.g. UGST76-2/171) via path or ?ref=.
     """
     uid = get_uid()
+    ref = (purchase_ref or request.args.get('ref') or request.args.get('purchase_ref') or '').strip()
+    if not ref:
+        return jsonify({"success": False, "error": "Purchase Reference / Invoice No is required"}), 400
+
     pur = query("""
         SELECT * FROM purchases 
-        WHERE user_id=? AND (id=? OR purchase_id=? OR invoice_no=?)
-    """, (uid, purchase_ref, purchase_ref, purchase_ref), one=True)
+        WHERE user_id=? 
+          AND (id=? OR purchase_id=? OR invoice_no=? 
+               OR UPPER(TRIM(invoice_no))=UPPER(TRIM(?)) 
+               OR UPPER(TRIM(purchase_id))=UPPER(TRIM(?)))
+    """, (uid, ref, ref, ref, ref, ref), one=True)
     if not pur:
-        return jsonify({"success": False, "error": "Purchase invoice not found"}), 404
+        return jsonify({"success": False, "error": f"Purchase invoice '{ref}' not found"}), 404
 
     orig_items = rows("SELECT * FROM purchase_items WHERE purchase_id=?", (pur['id'],))
 
@@ -1290,13 +1654,19 @@ def get_purchase_return_context(purchase_ref):
     for it in orig_items:
         purchased_qty = float(it.get('qty', 0))
         already_ret = ret_map.get(it['id'], ret_map.get(it['product'], 0.0))
-        returnable = max(0.0, round(purchased_qty - already_ret, 2))
+        unit = it.get('unit', 'Pcs')
+        returnable = max(0.0, round(purchased_qty - already_ret, 3))
+        if is_discrete_unit(unit):
+            purchased_qty = float(round(purchased_qty))
+            already_ret = float(round(already_ret))
+            returnable = float(round(returnable))
+
         price = float(it.get('buy_price', it.get('price', 0)))
         items_context.append({
             "original_item_id": it['id'],
             "product": it['product'],
             "hsn_code": it.get('hsn_code', ''),
-            "unit": it.get('unit', 'Pcs'),
+            "unit": unit,
             "purchased_qty": purchased_qty,
             "original_qty": purchased_qty,
             "already_returned_qty": already_ret,
@@ -1317,21 +1687,24 @@ def get_purchase_return_context(purchase_ref):
 def create_purchase_return():
     """
     Creates a formal GST Debit Note for a Purchase Return.
-    Enforces maximum returnable quantity, computes taxes, and deducts inventory.
+    Enforces unit-aware quantity precision, maximum returnable quantity, computes taxes, and deducts inventory.
     """
     uid = get_uid()
     d = request.get_json(silent=True) or {}
-    pur_ref = str(d.get('original_purchase_id') or d.get('original_invoice_no') or d.get('original_purchase_ref') or '').strip()
+    pur_ref = str(d.get('original_purchase_id') or d.get('original_invoice_no') or d.get('original_purchase_ref') or d.get('purchase_id') or d.get('invoice_no') or '').strip()
     return_items_req = d.get('items', [])
     if not pur_ref or not return_items_req:
         return jsonify({"success": False, "error": "Original purchase invoice and return items required"}), 400
 
     pur = query("""
         SELECT * FROM purchases 
-        WHERE user_id=? AND (id=? OR purchase_id=? OR invoice_no=?)
-    """, (uid, pur_ref, pur_ref, pur_ref), one=True)
+        WHERE user_id=? 
+          AND (id=? OR purchase_id=? OR invoice_no=? 
+               OR UPPER(TRIM(invoice_no))=UPPER(TRIM(?)) 
+               OR UPPER(TRIM(purchase_id))=UPPER(TRIM(?)))
+    """, (uid, pur_ref, pur_ref, pur_ref, pur_ref, pur_ref), one=True)
     if not pur:
-        return jsonify({"success": False, "error": "Original purchase invoice not found"}), 404
+        return jsonify({"success": False, "error": f"Original purchase invoice '{pur_ref}' not found"}), 404
 
     orig_items = {it['id']: it for it in rows("SELECT * FROM purchase_items WHERE purchase_id=?", (pur['id'],))}
 
@@ -1355,19 +1728,25 @@ def create_purchase_return():
     tot_taxable = tot_cgst = tot_sgst = tot_igst = tot_amount = 0.0
 
     for req_it in return_items_req:
-        qty = float(req_it.get('qty') if req_it.get('qty') is not None else (req_it.get('return_qty') or 0))
-        if qty <= 0:
-            continue
+        raw_qty = req_it.get('qty') if req_it.get('qty') is not None else (req_it.get('return_qty') or 0)
         orig_id = req_it.get('original_item_id')
         orig_it = orig_items.get(orig_id)
         if not orig_it:
-            orig_it = next((v for v in orig_items.values() if v['product'] == req_it.get('product')), None)
+            req_pname = req_it.get('product') or req_it.get('product_name')
+            orig_it = next((v for v in orig_items.values() if v['product'] == req_pname), None)
             if not orig_it:
-                return jsonify({"success": False, "error": f"Item '{req_it.get('product')}' not found in original purchase"}), 400
+                return jsonify({"success": False, "error": f"Item '{req_pname}' not found in original purchase"}), 400
+
+        unit = orig_it.get('unit', 'Pcs')
+        is_valid, qty, err_msg = validate_quantity_precision(raw_qty, unit)
+        if not is_valid:
+            return jsonify({"success": False, "error": err_msg}), 400
+        if qty <= 0:
+            continue
 
         purchased_q = float(orig_it.get('qty', 0))
         already_q = ret_map.get(orig_it['id'], 0.0)
-        max_returnable = max(0.0, round(purchased_q - already_q, 2))
+        max_returnable = max(0.0, round(purchased_q - already_q, 3))
         if qty > max_returnable + 0.001:
             return jsonify({
                 "success": False,
@@ -1382,7 +1761,7 @@ def create_purchase_return():
             "original_item_id": orig_it['id'],
             "product": orig_it['product'],
             "hsn_code": orig_it.get('hsn_code', ''),
-            "unit": orig_it.get('unit', 'Pcs'),
+            "unit": unit,
             "qty": qty,
             "price": price,
             "taxable_amount": line_calc['taxable'],
@@ -1402,56 +1781,59 @@ def create_purchase_return():
     if not valid_return_items:
         return jsonify({"success": False, "error": "No valid items selected for purchase return"}), 400
 
+    # Guarantee globally unique Debit Note number across all tenants
     year = str(date.today().year)
-    last_dn = query("SELECT debit_note_no FROM purchase_returns WHERE user_id=? AND debit_note_no LIKE ? ORDER BY id DESC LIMIT 1",
-                    (uid, f"DN-{year}-%"), one=True)
-    if last_dn:
-        try:
-            num = int(last_dn['debit_note_no'].split('-')[-1])
-            dn_no = f"DN-{year}-{(num + 1):04d}"
-        except Exception:
-            dn_no = f"DN-{year}-0001"
-    else:
-        dn_no = f"DN-{year}-0001"
+    existing_dns = {r['debit_note_no'] for r in rows("SELECT debit_note_no FROM purchase_returns WHERE debit_note_no LIKE ?", (f"DN-{year}-%",))}
+    seq = 1
+    while f"DN-{year}-{seq:04d}" in existing_dns:
+        seq += 1
+    dn_no = f"DN-{year}-{seq:04d}"
 
     inv_display = pur.get('invoice_no') or pur.get('purchase_id') or f"PUR-{pur['id']}"
     db = get_db()
-    db.execute("""
-        INSERT INTO purchase_returns (
-            debit_note_no, user_id, original_purchase_id, original_invoice_no, original_bill_date,
-            supplier_name, supplier_phone, supplier_gstin, place_of_supply, is_interstate,
-            return_date, reason, subtotal, cgst_amount, sgst_amount, igst_amount, total_amount,
-            refund_mode, notes
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (
-        dn_no, uid, pur['id'], inv_display, pur.get('bill_date', ''),
-        pur.get('supplier_name', ''), pur.get('supplier_phone', ''), pur.get('supplier_gstin', ''),
-        pur.get('state_code', '07'), int(is_inter),
-        tx_date, d.get('reason', 'Defective Goods Return'),
-        round(tot_taxable, 2), round(tot_cgst, 2), round(tot_sgst, 2), round(tot_igst, 2), round(tot_amount, 2),
-        d.get('refund_mode', 'Debit Note'), d.get('notes', '')
-    ))
-    dn_id = db.execute("SELECT last_insert_rowid() as id").fetchone()['id']
-
-    for it in valid_return_items:
+    try:
         db.execute("""
-            INSERT INTO purchase_return_items (
-                return_id, original_item_id, product, hsn_code, qty, unit, price,
-                taxable_amount, gst_pct, cgst_amount, sgst_amount, igst_amount, total_amount
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO purchase_returns (
+                debit_note_no, user_id, original_purchase_id, original_invoice_no, original_bill_date,
+                supplier_name, supplier_phone, supplier_gstin, place_of_supply, is_interstate,
+                return_date, reason, subtotal, cgst_amount, sgst_amount, igst_amount, total_amount,
+                refund_mode, notes
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
-            dn_id, it['original_item_id'], it['product'], it['hsn_code'], it['qty'], it['unit'], it['price'],
-            it['taxable_amount'], it['gst_pct'], it['cgst_amount'], it['sgst_amount'], it['igst_amount'], it['total_amount']
+            dn_no, uid, pur['id'], inv_display, pur.get('bill_date', ''),
+            pur.get('supplier_name', ''), pur.get('supplier_phone', ''), pur.get('supplier_gstin', ''),
+            pur.get('state_code', '07'), int(is_inter),
+            tx_date, d.get('reason', 'Defective Goods Return'),
+            round(tot_taxable, 2), round(tot_cgst, 2), round(tot_sgst, 2), round(tot_igst, 2), round(tot_amount, 2),
+            d.get('refund_mode', 'Debit Note'), d.get('notes', '')
         ))
-        db.execute("UPDATE products SET stock = MAX(0, stock - ?) WHERE user_id=? AND name=?", (it['qty'], uid, it['product']))
-        prod = query("SELECT id FROM products WHERE user_id=? AND name=?", (uid, it['product']), one=True)
-        if prod:
-            db.execute("""
-                INSERT INTO stock_adjustments (user_id, product_id, product_name, qty, type, reason, notes)
-                VALUES (?, ?, ?, ?, 'remove', 'Purchase Return', ?)
-            """, (uid, prod['id'], it['product'], it['qty'], f"Debit Note {dn_no} against {inv_display}"))
+        dn_id = db.execute("SELECT last_insert_rowid() as id").fetchone()['id']
 
-    db.commit()
+        for it in valid_return_items:
+            db.execute("""
+                INSERT INTO purchase_return_items (
+                    return_id, original_item_id, product, hsn_code, qty, unit, price,
+                    taxable_amount, gst_pct, cgst_amount, sgst_amount, igst_amount, total_amount
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                dn_id, it['original_item_id'], it['product'], it['hsn_code'], it['qty'], it['unit'], it['price'],
+                it['taxable_amount'], it['gst_pct'], it['cgst_amount'], it['sgst_amount'], it['igst_amount'], it['total_amount']
+            ))
+            db.execute("UPDATE products SET stock = MAX(0, stock - ?) WHERE user_id=? AND name=?", (it['qty'], uid, it['product']))
+            prod_row = db.execute("SELECT id FROM products WHERE user_id=? AND name=?", (uid, it['product'])).fetchone()
+            if prod_row:
+                db.execute("""
+                    INSERT INTO stock_adjustments (user_id, product_id, product_name, qty, type, reason, notes, created_at)
+                    VALUES (?, ?, ?, ?, 'remove', 'Purchase Return', ?, datetime('now'))
+                """, (uid, prod_row['id'], it['product'], it['qty'], f"Debit Note {dn_no} against {inv_display}"))
+
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        return jsonify({"success": False, "error": f"Failed to record purchase return: {str(e)}"}), 500
+    finally:
+        db.close()
+
     return jsonify({
         "success": True,
         "debit_note_no": dn_no,
@@ -1479,7 +1861,7 @@ def get_purchase_returns():
     returns = rows(sql, params)
     for r in returns:
         r['items'] = rows("SELECT * FROM purchase_return_items WHERE return_id=?", (r['id'],))
-    return jsonify({"success": True, "purchase_returns": returns})
+    return jsonify({"success": True, "purchase_returns": returns, "returns": returns})
 
 
 @app.route('/api/purchases/returns/<debit_note_no>', methods=['GET'])
@@ -1492,6 +1874,97 @@ def get_single_purchase_return(debit_note_no):
     items = rows("SELECT * FROM purchase_return_items WHERE return_id=?", (dn['id'],))
     shop = query("SELECT * FROM shops WHERE user_id=?", (uid,), one=True) or {}
     return jsonify({"success": True, "debit_note": dict(dn), "items": items, "shop": dict(shop)})
+
+
+@app.route('/api/purchases/returns/export/csv', methods=['GET'])
+@login_required
+def export_purchase_returns_csv():
+    import io, csv
+    from flask import Response
+    uid = get_uid()
+    sql = """
+        SELECT pr.debit_note_no, pr.original_invoice_no, pr.original_bill_date, pr.return_date,
+               pr.supplier_name, pr.supplier_gstin, pr.reason, pr.refund_mode, pr.notes,
+               pri.product, pri.hsn_code, pri.qty, pri.unit, pri.price,
+               pri.taxable_amount, pri.gst_pct, pri.cgst_amount, pri.sgst_amount, pri.igst_amount, pri.total_amount
+        FROM purchase_returns pr
+        JOIN purchase_return_items pri ON pri.return_id = pr.id
+        WHERE pr.user_id = ?
+        ORDER BY pr.return_date DESC, pr.id DESC
+    """
+    records = rows(sql, (uid,))
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow([
+        'Debit Note No', 'Original Invoice No', 'Original Purchase Date', 'Return Date',
+        'Supplier Name', 'Supplier GSTIN', 'Product', 'HSN/SAC', 'Returned Qty', 'Unit',
+        'Rate', 'Taxable Value', 'GST %', 'CGST', 'SGST', 'IGST', 'Total Return Amount',
+        'Return Reason', 'Settlement Mode', 'Notes'
+    ])
+    for r in records:
+        writer.writerow([
+            r['debit_note_no'], r['original_invoice_no'], r['original_bill_date'], r['return_date'],
+            r['supplier_name'], r['supplier_gstin'], r['product'], r['hsn_code'], r['qty'], r['unit'],
+            r['price'], r['taxable_amount'], r['gst_pct'], r['cgst_amount'], r['sgst_amount'], r['igst_amount'], r['total_amount'],
+            r['reason'], r['refund_mode'], r['notes']
+        ])
+    
+    # Bottom Total Row as required by Part 10
+    tot_taxable = round(sum(float(r['taxable_amount'] or 0) for r in records), 2)
+    tot_cgst = round(sum(float(r['cgst_amount'] or 0) for r in records), 2)
+    tot_sgst = round(sum(float(r['sgst_amount'] or 0) for r in records), 2)
+    tot_igst = round(sum(float(r['igst_amount'] or 0) for r in records), 2)
+    tot_amount = round(sum(float(r['total_amount'] or 0) for r in records), 2)
+    distinct_dns = len({r['debit_note_no'] for r in records})
+
+    writer.writerow([])
+    writer.writerow([
+        f'TOTAL DEBIT NOTES ({distinct_dns})', '', '', '', '', '', '', '', '', '',
+        '', tot_taxable, '', tot_cgst, tot_sgst, tot_igst, tot_amount, '', '', ''
+    ])
+    writer.writerow([])
+    writer.writerow(['TOTAL DEBIT NOTES', distinct_dns])
+    writer.writerow(['TOTAL TAXABLE REVERSAL', tot_taxable])
+    writer.writerow(['TOTAL CGST', tot_cgst])
+    writer.writerow(['TOTAL SGST', tot_sgst])
+    writer.writerow(['TOTAL IGST', tot_igst])
+    writer.writerow(['TOTAL ITC REVERSAL', round(tot_cgst + tot_sgst + tot_igst, 2)])
+    writer.writerow(['TOTAL DEBIT NOTE VALUE', tot_amount])
+
+    return Response(
+        "\ufeff" + output.getvalue(),
+        mimetype='text/csv; charset=utf-8',
+        headers={"Content-Disposition": f"attachment; filename=Purchase_Returns_DebitNotes_{date.today().strftime('%Y%m%d')}.csv"}
+    )
+
+
+@app.route('/api/purchases/returns/export/excel', methods=['GET'])
+@login_required
+def export_purchase_returns_excel():
+    import excel_engine
+    from flask import send_file
+    uid = get_uid()
+    sql = """
+        SELECT pr.debit_note_no, pr.original_invoice_no, pr.original_bill_date, pr.return_date,
+               pr.supplier_name, pr.supplier_gstin, pr.reason, pr.refund_mode, pr.notes,
+               pri.product, pri.hsn_code, pri.qty, pri.unit, pri.price,
+               pri.taxable_amount, pri.gst_pct, pri.cgst_amount, pri.sgst_amount, pri.igst_amount, pri.total_amount
+        FROM purchase_returns pr
+        JOIN purchase_return_items pri ON pri.return_id = pr.id
+        WHERE pr.user_id = ?
+        ORDER BY pr.return_date DESC, pr.id DESC
+    """
+    records = rows(sql, (uid,))
+    shop = query("SELECT * FROM shops WHERE user_id=?", (uid,), one=True) or {}
+    bio = excel_engine.generate_debit_notes_workbook(dict(shop), records)
+    filename = f"Purchase_Returns_DebitNotes_{date.today().strftime('%Y%m%d')}.xlsx"
+    return send_file(
+        bio,
+        as_attachment=True,
+        download_name=filename,
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    )
+
 
 
 # ── GST RETURN CENTER (GSTR-1, GSTR-3B & AUDIT RECONCILIATION) ──
@@ -2376,11 +2849,24 @@ def supplier_purchases(sid):
     sup = query("SELECT * FROM suppliers WHERE id=? AND user_id=?", (sid, uid), one=True)
     if not sup:
         return jsonify({"success": False, "error": "Supplier not found"}), 404
-    purch = rows(
-        "SELECT * FROM purchases WHERE user_id=? AND supplier_name=? ORDER BY created_at DESC",
-        (uid, sup['name'])
-    )
-    total = sum(p['total_amount'] for p in purch)
+
+    sup_name = (sup.get('name') or '').strip()
+    sup_gstin = (sup.get('gstin') or '').strip()
+
+    if sup_gstin:
+        sql = """
+            SELECT * FROM purchases 
+            WHERE user_id=? 
+              AND (LOWER(TRIM(supplier_name)) = LOWER(TRIM(?))
+                   OR (supplier_gstin IS NOT NULL AND supplier_gstin != '' AND UPPER(TRIM(supplier_gstin)) = UPPER(TRIM(?))))
+            ORDER BY bill_date DESC, id DESC
+        """
+        purch = rows(sql, (uid, sup_name, sup_gstin))
+    else:
+        sql = "SELECT * FROM purchases WHERE user_id=? AND LOWER(TRIM(supplier_name)) = LOWER(TRIM(?)) ORDER BY bill_date DESC, id DESC"
+        purch = rows(sql, (uid, sup_name))
+
+    total = sum(float(p.get('total_amount', 0)) for p in purch)
     return jsonify({
         "success": True,
         "supplier": dict(sup),
@@ -2388,6 +2874,44 @@ def supplier_purchases(sid):
         "bill_count": len(purch),
         "total_amount": round(total, 2)
     })
+
+
+@app.route('/api/suppliers/<int:sid>/export/excel', methods=['GET'])
+@login_required
+def export_supplier_bills_excel(sid):
+    import excel_engine
+    from flask import send_file
+    uid = get_uid()
+    sup = query("SELECT * FROM suppliers WHERE id=? AND user_id=?", (sid, uid), one=True)
+    if not sup:
+        return jsonify({"success": False, "error": "Supplier not found"}), 404
+
+    shop = query("SELECT * FROM shops WHERE user_id=?", (uid,), one=True) or {}
+    sup_name = (sup.get('name') or '').strip()
+    sup_gstin = (sup.get('gstin') or '').strip()
+
+    if sup_gstin:
+        sql = """
+            SELECT * FROM purchases 
+            WHERE user_id=? 
+              AND (LOWER(TRIM(supplier_name)) = LOWER(TRIM(?))
+                   OR (supplier_gstin IS NOT NULL AND supplier_gstin != '' AND UPPER(TRIM(supplier_gstin)) = UPPER(TRIM(?))))
+            ORDER BY bill_date DESC, id DESC
+        """
+        purch = rows(sql, (uid, sup_name, sup_gstin))
+    else:
+        sql = "SELECT * FROM purchases WHERE user_id=? AND LOWER(TRIM(supplier_name)) = LOWER(TRIM(?)) ORDER BY bill_date DESC, id DESC"
+        purch = rows(sql, (uid, sup_name))
+
+    bio = excel_engine.generate_supplier_bills_workbook(dict(shop), dict(sup), purch)
+    safe_name = "".join(c for c in sup_name if c.isalnum() or c in (' ', '_', '-')).strip().replace(' ', '_')
+    filename = f"Supplier_Bills_{safe_name or 'Supplier'}_{date.today().strftime('%Y%m%d')}.xlsx"
+    return send_file(
+        bio,
+        as_attachment=True,
+        download_name=filename,
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    )
 
 # ─────────────────────────────────────────────────────────────
 #  SUPPLIERS
@@ -2458,10 +2982,11 @@ def get_sales():
 def add_sale():
     uid = get_uid()
     plan_info = get_user_plan_info(uid)
-    if plan_info.get('status') == 'expired' and not plan_info.get('is_master'):
+    if plan_info.get('status') in ('expired', 'suspended') and not plan_info.get('is_master'):
+        err_msg = "Aapka subscription Master Admin dwara stop / suspend kiya gaya hai. Please support se contact karein." if plan_info.get('status') == 'suspended' else "Aapka 7-Day Free Trial poora ho gaya hai. Agla bill generate karne ke liye subscription renew karein."
         return jsonify({
             "success": False,
-            "error": "Aapka 7-Day Free Trial poora ho gaya hai. Agla bill generate karne ke liye subscription renew karein.",
+            "error": err_msg,
             "trial_expired": True
         }), 403
 
@@ -2639,6 +3164,115 @@ def get_purchases():
         p['items'] = rows("SELECT * FROM purchase_items WHERE purchase_id=?", (p['id'],))
     return jsonify({"success": True, "purchases": data})
 
+def normalize_purchase_item_tuple(it):
+    name = (it.get('product') or it.get('name') or '').strip().upper()
+    try:
+        qty = round(float(it.get('qty', 0)), 2)
+    except (ValueError, TypeError):
+        qty = 0.0
+    try:
+        price = round(float(it.get('buy_price') if it.get('buy_price') is not None else it.get('price', 0)), 2)
+    except (ValueError, TypeError):
+        price = 0.0
+    return (name, qty, price)
+
+def check_duplicate_purchase(uid, invoice_no, supplier_name, supplier_gstin, incoming_items=None, exclude_id=None, bill_date=None, total_amount=None):
+    """
+    Prevents accidental re-saving of the SAME purchase:
+    Matches: Tenant (uid) + Supplier identity + Normalized Invoice No.
+    Blocks if:
+      A) Exact line-item signature matches (same products, quantities and rates), OR
+      B) High product-name overlap (>= 70%) AND invoice date matches AND bill total matches within 10% (OCR tolerance).
+    Allows genuine separate part-bills with same invoice number (different items/amounts),
+    and allows purchasing the same products under a new invoice.
+    Returns existing purchase dict if duplicate found, else None.
+    """
+    inv = (invoice_no or '').strip()
+    if not inv or not incoming_items:
+        return None
+    s_name = (supplier_name or '').strip().upper()
+    s_gstin = (supplier_gstin or '').strip().upper()
+    in_date = (bill_date or '').strip()[:10]
+
+    if total_amount is None:
+        try:
+            total_amount = sum(float(it.get('qty', 0)) * float(it.get('buy_price') if it.get('buy_price') is not None else it.get('price', 0)) * (1 + float(it.get('gst_pct', 0))/100) for it in incoming_items)
+        except Exception:
+            total_amount = 0.0
+    else:
+        try:
+            total_amount = float(total_amount or 0)
+        except (ValueError, TypeError):
+            total_amount = 0.0
+    
+    sql = "SELECT id, purchase_id, supplier_name, supplier_gstin, invoice_no, bill_date, total_amount FROM purchases WHERE user_id=? AND UPPER(TRIM(invoice_no))=UPPER(TRIM(?))"
+    params = [uid, inv]
+    if exclude_id:
+        sql += " AND id != ?"
+        params.append(exclude_id)
+        
+    candidates = rows(sql, params)
+    if not candidates:
+        return None
+        
+    new_sigs = [normalize_purchase_item_tuple(it) for it in incoming_items if (it.get('product') or it.get('name'))]
+    if not new_sigs:
+        return None
+    new_counts = Counter(new_sigs)
+    new_prod_names = [it[0] for it in new_sigs]
+    new_prod_counts = Counter(new_prod_names)
+
+    for ep in candidates:
+        ep_name = (ep.get('supplier_name') or '').strip().upper()
+        ep_gstin = (ep.get('supplier_gstin') or '').strip().upper()
+        
+        # 1. Supplier Identity Matching
+        same_supplier = False
+        if s_gstin and ep_gstin and s_gstin == ep_gstin:
+            same_supplier = True
+        elif s_name and ep_name and s_name == ep_name:
+            if not s_gstin or not ep_gstin or s_gstin == ep_gstin:
+                same_supplier = True
+            elif s_gstin[:2] == ep_gstin[:2]:
+                pan_s = s_gstin[2:12] if len(s_gstin) >= 12 else s_gstin
+                pan_ep = ep_gstin[2:12] if len(ep_gstin) >= 12 else ep_gstin
+                if pan_s == pan_ep or len(set(s_gstin) ^ set(ep_gstin)) <= 2:
+                    same_supplier = True
+        elif s_gstin and ep_gstin and len(s_gstin) >= 12 and len(ep_gstin) >= 12 and s_gstin[2:12] == ep_gstin[2:12]:
+            same_supplier = True
+
+        if not same_supplier:
+            continue
+
+        ep_items = rows("SELECT product, qty, buy_price, amount FROM purchase_items WHERE purchase_id=?", (ep['id'],))
+        ep_sigs = [normalize_purchase_item_tuple(it) for it in ep_items]
+        ep_counts = Counter(ep_sigs)
+        ep_prod_names = [it[0] for it in ep_sigs]
+        ep_prod_counts = Counter(ep_prod_names)
+
+        # Rule A: Exact line-items match (products, quantities and rates identical)
+        if new_counts == ep_counts:
+            return ep
+
+        common_items = list((new_counts & ep_counts).elements())
+        if len(common_items) >= max(len(new_sigs), len(ep_sigs)) * 0.8:
+            return ep
+
+        # Rule B: High product overlap (>= 70%) AND matching invoice date AND bill total within 10%
+        ep_date = (ep.get('bill_date') or '').strip()[:10]
+        date_matches = (bool(in_date) and bool(ep_date) and in_date == ep_date)
+        
+        common_prods = list((new_prod_counts & ep_prod_counts).elements())
+        prod_overlap_ratio = len(common_prods) / max(len(new_prod_names), len(ep_prod_names)) if max(len(new_prod_names), len(ep_prod_names)) > 0 else 0
+
+        if date_matches and prod_overlap_ratio >= 0.70:
+            ep_total = float(ep.get('total_amount') or 0)
+            diff_ratio = abs(total_amount - ep_total) / max(total_amount, ep_total) if max(total_amount, ep_total) > 0 else 0
+            if diff_ratio <= 0.10:
+                return ep
+
+    return None
+
 @app.route('/api/purchases', methods=['POST'])
 @login_required
 def add_purchase():
@@ -2649,6 +3283,20 @@ def add_purchase():
 
     db  = get_db()
     uid = get_uid()
+
+    # Duplicate Prevention Check: Tenant + Supplier + Invoice Number + Line-item Payload
+    inv_no = (d.get('invoice_no') or '').strip()
+    sup_name = (d.get('supplier_name') or '').strip()
+    sup_gstin = (d.get('supplier_gstin') or '').strip()
+    bill_date = (d.get('bill_date') or '').strip()
+    total_amt = d.get('total') or d.get('total_amount')
+    if inv_no:
+        dup = check_duplicate_purchase(uid, inv_no, sup_name, sup_gstin, incoming_items=items, bill_date=bill_date, total_amount=total_amt)
+        if dup:
+            return jsonify({
+                "success": False,
+                "error": f"Duplicate Purchase Bill! Invoice '{inv_no}' with identical items already exists for supplier '{dup.get('supplier_name')}' (Bill ID: {dup.get('purchase_id')}, Date: {dup.get('bill_date')}). Duplicate submission rejected."
+            }), 400
 
     subtotal = cgst_total = sgst_total = igst_total = 0
     purchase_id = gen_id('P')
@@ -2674,9 +3322,9 @@ def add_purchase():
     is_inter = is_interstate_supply(shop_code, party_code) if party_code else bool(d.get('is_interstate', 0))
 
     for item in items:
-        name      = (item.get('product') or '').strip()
+        name      = (item.get('product') or item.get('name') or '').strip()
         qty       = float(item.get('qty', 0))
-        buy_price = float(item.get('buy_price', 0))
+        buy_price = float(item.get('buy_price') if item.get('buy_price') is not None else item.get('price', 0))
         if not name or qty <= 0 or buy_price < 0:
             db.rollback()
             return jsonify({"success": False, "error": "Each purchase item needs a product, positive quantity, and non-negative price"}), 400
@@ -2754,6 +3402,19 @@ def update_purchase(pid):
     items = d.get('items', [])
     if not items:
         return jsonify({"success": False, "error": "No items provided"}), 400
+
+    inv_no = (d.get('invoice_no') if d.get('invoice_no') is not None else pur.get('invoice_no', '')).strip()
+    sup_name = (d.get('supplier_name') if d.get('supplier_name') is not None else pur.get('supplier_name', '')).strip()
+    sup_gstin = (d.get('supplier_gstin') if d.get('supplier_gstin') is not None else pur.get('supplier_gstin', '')).strip()
+    bill_date = (d.get('bill_date') if d.get('bill_date') is not None else pur.get('bill_date', '')).strip()
+    total_amt = d.get('total') or d.get('total_amount')
+    if inv_no:
+        dup = check_duplicate_purchase(uid, inv_no, sup_name, sup_gstin, incoming_items=items, exclude_id=pid, bill_date=bill_date, total_amount=total_amt)
+        if dup:
+            return jsonify({
+                "success": False,
+                "error": f"Duplicate Purchase Bill! Invoice '{inv_no}' with identical items already exists for supplier '{dup.get('supplier_name')}' (Bill ID: {dup.get('purchase_id')}, Date: {dup.get('bill_date')}). Duplicate submission rejected."
+            }), 400
 
     is_interstate = int(d.get('is_interstate', pur['is_interstate'] if 'is_interstate' in pur.keys() else 0))
     party_code = (d.get('supplier_gstin') or '')[:2] or d.get('state_code', pur.get('state_code', ''))
@@ -2868,80 +3529,198 @@ def suggest_hsn():
     except Exception as e:
         return jsonify({"success": False, "hsn": "", "gst": 18, "error": str(e)})
 
+def _extract_tally_vouchers(uid, d):
+    """
+    Extracts sales, purchases, credit notes, and debit notes for Tally export/sync.
+    Ensures that when specific voucher IDs are supplied (single or multiple), they are
+    retrieved directly without being erroneously dropped by date range or category filters.
+    """
+    vch_type = d.get('voucher_type', 'both')
+    category = d.get('category', 'all')
+    from_date = d.get('from_date') or ''
+    to_date = d.get('to_date') or ''
+
+    # Harmonize selected vouchers from all possible client keys
+    selected_sale_ids = d.get('selected_sales') or d.get('sales_ids') or d.get('selected_sales_ids') or []
+    if isinstance(selected_sale_ids, (str, int)):
+        selected_sale_ids = [selected_sale_ids]
+    selected_sale_ids = [str(x).strip() for x in selected_sale_ids if str(x).strip()]
+
+    selected_pur_ids = d.get('selected_purchases') or d.get('purchase_ids') or d.get('purchases_ids') or d.get('selected_purchases_ids') or []
+    if isinstance(selected_pur_ids, (str, int)):
+        selected_pur_ids = [selected_pur_ids]
+    selected_pur_ids = [str(x).strip() for x in selected_pur_ids if str(x).strip()]
+
+    selected_cn_ids = d.get('selected_credit_notes') or d.get('credit_notes_ids') or d.get('cn_ids') or []
+    if isinstance(selected_cn_ids, (str, int)):
+        selected_cn_ids = [selected_cn_ids]
+    selected_cn_ids = [str(x).strip() for x in selected_cn_ids if str(x).strip()]
+
+    selected_dn_ids = d.get('selected_debit_notes') or d.get('debit_notes_ids') or d.get('dn_ids') or []
+    if isinstance(selected_dn_ids, (str, int)):
+        selected_dn_ids = [selected_dn_ids]
+    selected_dn_ids = [str(x).strip() for x in selected_dn_ids if str(x).strip()]
+
+    # Also support generic selected_vouchers / vouchers array
+    generic_vouchers = d.get('selected_vouchers') or d.get('vouchers') or d.get('selected_voucher_ids') or []
+    if isinstance(generic_vouchers, (str, int)):
+        generic_vouchers = [generic_vouchers]
+    for v in [str(x).strip() for x in generic_vouchers if str(x).strip()]:
+        v_up = v.upper()
+        if v_up.startswith('CN') or 'CREDIT' in v_up:
+            selected_cn_ids.append(v)
+        elif v_up.startswith('DN') or 'DEBIT' in v_up:
+            selected_dn_ids.append(v)
+        elif vch_type == 'sales' or v_up.startswith(('INV', 'S')):
+            selected_sale_ids.append(v)
+        elif vch_type == 'purchases' or v_up.startswith(('PUR', 'UGST', 'SUP')):
+            selected_pur_ids.append(v)
+        else:
+            selected_sale_ids.append(v)
+            selected_pur_ids.append(v)
+
+    has_explicit_selection = bool(selected_sale_ids or selected_pur_ids or selected_cn_ids or selected_dn_ids)
+
+    # 1. SALES
+    sales_list = []
+    if (has_explicit_selection and selected_sale_ids) or (not has_explicit_selection and vch_type in ('sales', 'both')):
+        if selected_sale_ids:
+            placeholders = ','.join(['?'] * len(selected_sale_ids))
+            sql = f"""SELECT * FROM sales 
+                      WHERE user_id=? AND cancelled=0 
+                        AND (bill_id IN ({placeholders}) OR CAST(id AS TEXT) IN ({placeholders}))
+                      ORDER BY sale_date ASC"""
+            params = [uid] + selected_sale_ids + selected_sale_ids
+            raw_sales = rows(sql, params)
+        else:
+            sql = "SELECT * FROM sales WHERE user_id=? AND cancelled=0"
+            params = [uid]
+            if from_date:
+                sql += " AND sale_date >= ?"
+                params.append(from_date)
+            if to_date:
+                sql += " AND sale_date <= ?"
+                params.append(to_date)
+            if not d.get('include_kacha'):
+                sql += " AND bill_category != 'kacha'"
+            sql += " ORDER BY sale_date ASC"
+            raw_sales = rows(sql, params)
+
+        for s in raw_sales:
+            s_dict = dict(s)
+            s_dict['items'] = [dict(it) for it in rows("SELECT * FROM sale_items WHERE sale_id=?", (s['id'],))]
+            sales_list.append(s_dict)
+
+    # 2. PURCHASES
+    purchases_list = []
+    if (has_explicit_selection and selected_pur_ids) or (not has_explicit_selection and vch_type in ('purchases', 'both')):
+        if selected_pur_ids:
+            placeholders = ','.join(['?'] * len(selected_pur_ids))
+            sql = f"""SELECT * FROM purchases 
+                      WHERE user_id=? 
+                        AND (purchase_id IN ({placeholders}) OR invoice_no IN ({placeholders}) OR CAST(id AS TEXT) IN ({placeholders}))
+                      ORDER BY bill_date ASC"""
+            params = [uid] + selected_pur_ids + selected_pur_ids + selected_pur_ids
+            raw_pur = rows(sql, params)
+        else:
+            sql = "SELECT * FROM purchases WHERE user_id=?"
+            params = [uid]
+            if from_date:
+                sql += " AND bill_date >= ?"
+                params.append(from_date)
+            if to_date:
+                sql += " AND bill_date <= ?"
+                params.append(to_date)
+            sql += " ORDER BY bill_date ASC"
+            raw_pur = rows(sql, params)
+
+        for p in raw_pur:
+            p_dict = dict(p)
+            p_dict['items'] = [dict(it) for it in rows("SELECT * FROM purchase_items WHERE purchase_id=?", (p['id'],))]
+            purchases_list.append(p_dict)
+
+    # 3. CREDIT NOTES
+    cn_list = []
+    if (has_explicit_selection and selected_cn_ids) or (not has_explicit_selection and (d.get('include_credit_notes') or d.get('include_returns'))):
+        if selected_cn_ids:
+            placeholders = ','.join(['?'] * len(selected_cn_ids))
+            sql = f"""SELECT * FROM sales_returns 
+                      WHERE user_id=? 
+                        AND (credit_note_no IN ({placeholders}) OR CAST(id AS TEXT) IN ({placeholders}))
+                      ORDER BY return_date ASC"""
+            params = [uid] + selected_cn_ids + selected_cn_ids
+            raw_cn = rows(sql, params)
+        else:
+            sql = "SELECT * FROM sales_returns WHERE user_id=?"
+            params = [uid]
+            if from_date:
+                sql += " AND return_date >= ?"
+                params.append(from_date)
+            if to_date:
+                sql += " AND return_date <= ?"
+                params.append(to_date)
+            sql += " ORDER BY return_date ASC"
+            raw_cn = rows(sql, params)
+
+        for cn in raw_cn:
+            cn_dict = dict(cn)
+            cn_dict['items'] = [dict(it) for it in rows("SELECT * FROM sales_return_items WHERE return_id=?", (cn['id'],))]
+            cn_list.append(cn_dict)
+
+    # 4. DEBIT NOTES
+    dn_list = []
+    if (has_explicit_selection and selected_dn_ids) or (not has_explicit_selection and (d.get('include_debit_notes') or d.get('include_returns'))):
+        if selected_dn_ids:
+            placeholders = ','.join(['?'] * len(selected_dn_ids))
+            sql = f"""SELECT * FROM purchase_returns 
+                      WHERE user_id=? 
+                        AND (debit_note_no IN ({placeholders}) OR CAST(id AS TEXT) IN ({placeholders}))
+                      ORDER BY return_date ASC"""
+            params = [uid] + selected_dn_ids + selected_dn_ids
+            raw_dn = rows(sql, params)
+        else:
+            sql = "SELECT * FROM purchase_returns WHERE user_id=?"
+            params = [uid]
+            if from_date:
+                sql += " AND return_date >= ?"
+                params.append(from_date)
+            if to_date:
+                sql += " AND return_date <= ?"
+                params.append(to_date)
+            sql += " ORDER BY return_date ASC"
+            raw_dn = rows(sql, params)
+
+        for dn in raw_dn:
+            dn_dict = dict(dn)
+            dn_dict['items'] = [dict(it) for it in rows("SELECT * FROM purchase_return_items WHERE return_id=?", (dn['id'],))]
+            dn_list.append(dn_dict)
+
+    effective_category = 'all' if has_explicit_selection else category
+    return sales_list, purchases_list, cn_list, dn_list, has_explicit_selection, effective_category
+
+
 @app.route('/api/tally/export/v2', methods=['POST'])
 @login_required
 def tally_export_v2():
     uid = get_uid()
     d = request.get_json(silent=True) or {}
-    vch_type = d.get('voucher_type', 'both')
     category = d.get('category', 'all')
-    from_date = d.get('from_date') or ''
-    to_date = d.get('to_date') or ''
-    selected_sale_ids = d.get('selected_sales', [])
-    selected_pur_ids = d.get('selected_purchases', [])
     ledger_map = d.get('ledger_map', None)
 
     shop = query("SELECT * FROM shops WHERE user_id=?", (uid,), one=True) or {}
     company_name = shop.get('name') or 'My Shop'
 
-    sales_list = []
-    if vch_type in ('sales', 'both'):
-        sql = "SELECT * FROM sales WHERE user_id=? AND cancelled=0"
-        params = [uid]
-        if from_date:
-            sql += " AND sale_date >= ?"
-            params.append(from_date)
-        if to_date:
-            sql += " AND sale_date <= ?"
-            params.append(to_date)
-        if not d.get('include_kacha'):
-            sql += " AND bill_category != 'kacha'"
-        sql += " ORDER BY sale_date ASC"
-        raw_sales = rows(sql, params)
-        for s in raw_sales:
-            if selected_sale_ids and s['bill_id'] not in selected_sale_ids:
-                continue
-            s_dict = dict(s)
-            s_dict['items'] = [dict(it) for it in rows("SELECT * FROM sale_items WHERE sale_id=?", (s['id'],))]
-            sales_list.append(s_dict)
-
-    purchases_list = []
-    if vch_type in ('purchases', 'both'):
-        sql = "SELECT * FROM purchases WHERE user_id=?"
-        params = [uid]
-        if from_date:
-            sql += " AND bill_date >= ?"
-            params.append(from_date)
-        if to_date:
-            sql += " AND bill_date <= ?"
-            params.append(to_date)
-        sql += " ORDER BY bill_date ASC"
-        raw_pur = rows(sql, params)
-        for p in raw_pur:
-            if selected_pur_ids and (p['purchase_id'] not in selected_pur_ids and p['id'] not in selected_pur_ids):
-                continue
-            p_dict = dict(p)
-            p_dict['items'] = [dict(it) for it in rows("SELECT * FROM purchase_items WHERE purchase_id=?", (p['id'],))]
-            purchases_list.append(p_dict)
-
-    cn_list = []
-    raw_cn = rows("SELECT * FROM sales_returns WHERE user_id=? ORDER BY return_date ASC", (uid,))
-    for cn in raw_cn:
-        cn_dict = dict(cn)
-        cn_dict['items'] = [dict(it) for it in rows("SELECT * FROM sales_return_items WHERE return_id=?", (cn['id'],))]
-        cn_list.append(cn_dict)
-
-    dn_list = []
-    raw_dn = rows("SELECT * FROM purchase_returns WHERE user_id=? ORDER BY return_date ASC", (uid,))
-    for dn in raw_dn:
-        dn_dict = dict(dn)
-        dn_dict['items'] = [dict(it) for it in rows("SELECT * FROM purchase_return_items WHERE return_id=?", (dn['id'],))]
-        dn_list.append(dn_dict)
+    sales_list, purchases_list, cn_list, dn_list, has_explicit, eff_cat = _extract_tally_vouchers(uid, d)
 
     try:
         from tally_engine import generate_tally_v2_xml
-        res = generate_tally_v2_xml(company_name, sales_list, purchases_list, ledger_map, category, credit_notes_list=cn_list, debit_notes_list=dn_list)
+        res = generate_tally_v2_xml(company_name, sales_list, purchases_list, ledger_map, eff_cat, credit_notes_list=cn_list, debit_notes_list=dn_list)
         xml_data, s_cnt, p_cnt = res[0], res[1], res[2]
+        total_vouchers = s_cnt + p_cnt + len(cn_list) + len(dn_list)
+
+        if total_vouchers == 0 or '<VOUCHER' not in xml_data:
+            err_msg = "None of the selected vouchers could be found for export in the active company. Please verify your selection." if has_explicit else "No vouchers found matching the selected category and date range."
+            return jsonify({"success": False, "error": err_msg}), 400
         
         if d.get('summary_only'):
             taxable = sum(float(s.get('subtotal', 0)) for s in sales_list) + sum(float(p.get('subtotal', 0)) for p in purchases_list)
@@ -2953,6 +3732,9 @@ def tally_export_v2():
                 "success": True,
                 "sales_count": s_cnt,
                 "purchases_count": p_cnt,
+                "credit_notes_count": len(cn_list),
+                "debit_notes_count": len(dn_list),
+                "total_vouchers": total_vouchers,
                 "taxable_value": round(taxable, 2),
                 "cgst": round(cgst, 2),
                 "sgst": round(sgst, 2),
@@ -2964,6 +3746,7 @@ def tally_export_v2():
         filename = f"Tally_Export_{category}_{date.today().strftime('%Y%m%d')}.xml"
         response.headers['Content-Type'] = 'application/xml; charset=utf-8'
         response.headers['Content-Disposition'] = f'attachment; filename="{filename}"'
+        response.headers['Access-Control-Expose-Headers'] = 'Content-Disposition'
         return response
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
@@ -3002,72 +3785,19 @@ def tally_sync_live():
         }), 400
 
     tally_url = f"http://{tally_host}:{tally_port}"
-    vch_type = d.get('voucher_type', 'both')
-    category = d.get('category', 'all')
-    from_date = d.get('from_date') or ''
-    to_date = d.get('to_date') or ''
-    selected_sale_ids = d.get('selected_sales', [])
-    selected_pur_ids = d.get('selected_purchases', [])
     ledger_map = d.get('ledger_map', None)
 
-    sales_list = []
-    if vch_type in ('sales', 'both'):
-        sql = "SELECT * FROM sales WHERE user_id=? AND cancelled=0"
-        params = [uid]
-        if from_date:
-            sql += " AND sale_date >= ?"
-            params.append(from_date)
-        if to_date:
-            sql += " AND sale_date <= ?"
-            params.append(to_date)
-        if not d.get('include_kacha'):
-            sql += " AND bill_category != 'kacha'"
-        sql += " ORDER BY sale_date ASC"
-        raw_sales = rows(sql, params)
-        for s in raw_sales:
-            if selected_sale_ids and s['bill_id'] not in selected_sale_ids:
-                continue
-            s_dict = dict(s)
-            s_dict['items'] = [dict(it) for it in rows("SELECT * FROM sale_items WHERE sale_id=?", (s['id'],))]
-            sales_list.append(s_dict)
-
-    purchases_list = []
-    if vch_type in ('purchases', 'both'):
-        sql = "SELECT * FROM purchases WHERE user_id=?"
-        params = [uid]
-        if from_date:
-            sql += " AND bill_date >= ?"
-            params.append(from_date)
-        if to_date:
-            sql += " AND bill_date <= ?"
-            params.append(to_date)
-        sql += " ORDER BY bill_date ASC"
-        raw_pur = rows(sql, params)
-        for p in raw_pur:
-            if selected_pur_ids and (p['purchase_id'] not in selected_pur_ids and p['id'] not in selected_pur_ids):
-                continue
-            p_dict = dict(p)
-            p_dict['items'] = [dict(it) for it in rows("SELECT * FROM purchase_items WHERE purchase_id=?", (p['id'],))]
-            purchases_list.append(p_dict)
-
-    cn_list = []
-    raw_cn = rows("SELECT * FROM sales_returns WHERE user_id=? ORDER BY return_date ASC", (uid,))
-    for cn in raw_cn:
-        cn_dict = dict(cn)
-        cn_dict['items'] = [dict(it) for it in rows("SELECT * FROM sales_return_items WHERE return_id=?", (cn['id'],))]
-        cn_list.append(cn_dict)
-
-    dn_list = []
-    raw_dn = rows("SELECT * FROM purchase_returns WHERE user_id=? ORDER BY return_date ASC", (uid,))
-    for dn in raw_dn:
-        dn_dict = dict(dn)
-        dn_dict['items'] = [dict(it) for it in rows("SELECT * FROM purchase_return_items WHERE return_id=?", (dn['id'],))]
-        dn_list.append(dn_dict)
+    sales_list, purchases_list, cn_list, dn_list, has_explicit, eff_cat = _extract_tally_vouchers(uid, d)
 
     try:
         from tally_engine import generate_tally_v2_xml
-        res = generate_tally_v2_xml(company_name, sales_list, purchases_list, ledger_map, category, credit_notes_list=cn_list, debit_notes_list=dn_list)
+        res = generate_tally_v2_xml(company_name, sales_list, purchases_list, ledger_map, eff_cat, credit_notes_list=cn_list, debit_notes_list=dn_list)
         xml_data, s_cnt, p_cnt = res[0], res[1], res[2]
+        total_vouchers = s_cnt + p_cnt + len(cn_list) + len(dn_list)
+
+        if total_vouchers == 0 or '<VOUCHER' not in xml_data:
+            err_msg = "None of the selected vouchers could be found to sync with Tally. Please verify your selection." if has_explicit else "No vouchers found matching the selected criteria to sync with Tally."
+            return jsonify({"success": False, "error": err_msg}), 400
         
         import urllib.request, urllib.error, re
         req = urllib.request.Request(
@@ -3232,6 +3962,36 @@ def tally_connector_status():
     })
 
 
+def classify_gst_bucket(pct):
+    if pct is None:
+        return "0", 0.0
+    try:
+        p = round(float(pct), 2)
+    except (ValueError, TypeError):
+        return None, None
+
+    if abs(p - 28.0) <= 0.1:
+        return "28", 28.0
+    elif abs(p - 18.0) <= 0.1:
+        return "18", 18.0
+    elif abs(p - 12.0) <= 0.1:
+        return "12", 12.0
+    elif abs(p - 5.0) <= 0.1:
+        return "5", 5.0
+    elif abs(p - 0.0) <= 0.1:
+        return "0", 0.0
+    else:
+        return None, None
+
+def get_initial_gst_rates_data():
+    return {
+        "28": {"rate_label": "28% GST (14% CGST + 14% SGST / 28% IGST)", "sales_taxable": 0.0, "purchases_taxable": 0.0, "cgst": 0.0, "sgst": 0.0, "igst": 0.0, "total_tax": 0.0, "total_value": 0.0, "invoices": []},
+        "18": {"rate_label": "18% GST (9% CGST + 9% SGST / 18% IGST)", "sales_taxable": 0.0, "purchases_taxable": 0.0, "cgst": 0.0, "sgst": 0.0, "igst": 0.0, "total_tax": 0.0, "total_value": 0.0, "invoices": []},
+        "12": {"rate_label": "12% GST (6% CGST + 6% SGST / 12% IGST)", "sales_taxable": 0.0, "purchases_taxable": 0.0, "cgst": 0.0, "sgst": 0.0, "igst": 0.0, "total_tax": 0.0, "total_value": 0.0, "invoices": []},
+        "5":  {"rate_label": "5% GST (2.5% CGST + 2.5% SGST / 5% IGST)", "sales_taxable": 0.0, "purchases_taxable": 0.0, "cgst": 0.0, "sgst": 0.0, "igst": 0.0, "total_tax": 0.0, "total_value": 0.0, "invoices": []},
+        "0":  {"rate_label": "0% Exempted / Nil Rated", "sales_taxable": 0.0, "purchases_taxable": 0.0, "cgst": 0.0, "sgst": 0.0, "igst": 0.0, "total_tax": 0.0, "total_value": 0.0, "invoices": []}
+    }
+
 @app.route('/api/gst/drilldown', methods=['GET'])
 @login_required
 def gst_drilldown():
@@ -3242,14 +4002,10 @@ def gst_drilldown():
     uid = get_uid()
     month = request.args.get('month', str(date.today())[:7])
     
-    sales = rows("SELECT * FROM sales WHERE user_id=? AND sale_date LIKE ? AND cancelled=0 ORDER BY sale_date ASC", (uid, month + '%'))
+    sales = rows("SELECT * FROM sales WHERE user_id=? AND sale_date LIKE ? AND cancelled=0 AND (bill_category!='kacha' OR bill_category IS NULL) ORDER BY sale_date ASC", (uid, month + '%'))
     purchases = rows("SELECT * FROM purchases WHERE user_id=? AND bill_date LIKE ? ORDER BY bill_date ASC", (uid, month + '%'))
     
-    rates_data = {
-        "18": {"rate_label": "18% GST (9% CGST + 9% SGST / 18% IGST)", "sales_taxable": 0.0, "purchases_taxable": 0.0, "cgst": 0.0, "sgst": 0.0, "igst": 0.0, "total_tax": 0.0, "total_value": 0.0, "invoices": []},
-        "5":  {"rate_label": "5% GST (2.5% CGST + 2.5% SGST / 5% IGST)", "sales_taxable": 0.0, "purchases_taxable": 0.0, "cgst": 0.0, "sgst": 0.0, "igst": 0.0, "total_tax": 0.0, "total_value": 0.0, "invoices": []},
-        "0":  {"rate_label": "0% Exempted / Nil Rated", "sales_taxable": 0.0, "purchases_taxable": 0.0, "cgst": 0.0, "sgst": 0.0, "igst": 0.0, "total_tax": 0.0, "total_value": 0.0, "invoices": []}
-    }
+    rates_data = get_initial_gst_rates_data()
     
     for s in sales:
         s_items = rows("SELECT * FROM sale_items WHERE sale_id=?", (s['id'],))
@@ -3257,21 +4013,24 @@ def gst_drilldown():
         by_rate = {}
         for it in s_items:
             pct = float(it.get('gst_pct', 0))
-            bucket = "18" if pct >= 12 else ("5" if pct > 0 else "0")
-            by_rate.setdefault(bucket, []).append(it)
+            bucket, b_gst_pct = classify_gst_bucket(pct)
+            if not bucket:
+                continue
+            by_rate.setdefault(bucket, []).append((it, b_gst_pct))
             
-        for bucket, it_list in by_rate.items():
+        for bucket, items_with_rate in by_rate.items():
+            it_list = [x[0] for x in items_with_rate]
+            b_gst_pct = items_with_rate[0][1]
             b_taxable = sum(round(float(x.get('qty', 1)) * float(x.get('price', 0)), 2) for x in it_list)
-            b_gst_pct = 18.0 if bucket == "18" else (5.0 if bucket == "5" else 0.0)
             if is_inter:
-                b_igst = round(b_taxable * b_gst_pct / 100, 2)
+                b_igst = round(b_taxable * (b_gst_pct / 100), 2)
                 b_cgst = b_sgst = 0.0
             else:
-                b_cgst = round(b_taxable * (b_gst_pct / 2) / 100, 2)
-                b_sgst = round(b_taxable * (b_gst_pct / 2) / 100, 2)
+                b_cgst = round(b_taxable * (b_gst_pct / 200), 2)
+                b_sgst = round(b_taxable * (b_gst_pct / 200), 2)
                 b_igst = 0.0
-            b_tax = b_cgst + b_sgst + b_igst
-            b_total = b_taxable + b_tax
+            b_tax = round(b_cgst + b_sgst + b_igst, 2)
+            b_total = round(b_taxable + b_tax, 2)
             
             rates_data[bucket]["sales_taxable"] = round(rates_data[bucket]["sales_taxable"] + b_taxable, 2)
             rates_data[bucket]["cgst"] = round(rates_data[bucket]["cgst"] + b_cgst, 2)
@@ -3309,21 +4068,24 @@ def gst_drilldown():
         by_rate = {}
         for it in p_items:
             pct = float(it.get('gst_pct', 0))
-            bucket = "18" if pct >= 12 else ("5" if pct > 0 else "0")
-            by_rate.setdefault(bucket, []).append(it)
+            bucket, b_gst_pct = classify_gst_bucket(pct)
+            if not bucket:
+                continue
+            by_rate.setdefault(bucket, []).append((it, b_gst_pct))
             
-        for bucket, it_list in by_rate.items():
+        for bucket, items_with_rate in by_rate.items():
+            it_list = [x[0] for x in items_with_rate]
+            b_gst_pct = items_with_rate[0][1]
             b_taxable = sum(round(float(x.get('qty', 1)) * float(x.get('buy_price', x.get('price', 0))), 2) for x in it_list)
-            b_gst_pct = 18.0 if bucket == "18" else (5.0 if bucket == "5" else 0.0)
             if is_inter:
-                b_igst = round(b_taxable * b_gst_pct / 100, 2)
+                b_igst = round(b_taxable * (b_gst_pct / 100), 2)
                 b_cgst = b_sgst = 0.0
             else:
-                b_cgst = round(b_taxable * (b_gst_pct / 2) / 100, 2)
-                b_sgst = round(b_taxable * (b_gst_pct / 2) / 100, 2)
+                b_cgst = round(b_taxable * (b_gst_pct / 200), 2)
+                b_sgst = round(b_taxable * (b_gst_pct / 200), 2)
                 b_igst = 0.0
-            b_tax = b_cgst + b_sgst + b_igst
-            b_total = b_taxable + b_tax
+            b_tax = round(b_cgst + b_sgst + b_igst, 2)
+            b_total = round(b_taxable + b_tax, 2)
             
             rates_data[bucket]["purchases_taxable"] = round(rates_data[bucket]["purchases_taxable"] + b_taxable, 2)
             rates_data[bucket]["total_value"] = round(rates_data[bucket]["total_value"] + b_total, 2)
@@ -3359,21 +4121,24 @@ def gst_drilldown():
         by_rate = {}
         for it in cn_items:
             pct = float(it.get('gst_pct', 0))
-            bucket = "18" if pct >= 12 else ("5" if pct > 0 else "0")
-            by_rate.setdefault(bucket, []).append(it)
+            bucket, b_gst_pct = classify_gst_bucket(pct)
+            if not bucket:
+                continue
+            by_rate.setdefault(bucket, []).append((it, b_gst_pct))
 
-        for bucket, it_list in by_rate.items():
+        for bucket, items_with_rate in by_rate.items():
+            it_list = [x[0] for x in items_with_rate]
+            b_gst_pct = items_with_rate[0][1]
             b_taxable = sum(round(float(x.get('qty', 1)) * float(x.get('price', 0)), 2) for x in it_list)
-            b_gst_pct = 18.0 if bucket == "18" else (5.0 if bucket == "5" else 0.0)
             if is_inter:
-                b_igst = round(b_taxable * b_gst_pct / 100, 2)
+                b_igst = round(b_taxable * (b_gst_pct / 100), 2)
                 b_cgst = b_sgst = 0.0
             else:
-                b_cgst = round(b_taxable * (b_gst_pct / 2) / 100, 2)
-                b_sgst = round(b_taxable * (b_gst_pct / 2) / 100, 2)
+                b_cgst = round(b_taxable * (b_gst_pct / 200), 2)
+                b_sgst = round(b_taxable * (b_gst_pct / 200), 2)
                 b_igst = 0.0
-            b_tax = b_cgst + b_sgst + b_igst
-            b_total = b_taxable + b_tax
+            b_tax = round(b_cgst + b_sgst + b_igst, 2)
+            b_total = round(b_taxable + b_tax, 2)
 
             rates_data[bucket]["sales_taxable"] = round(rates_data[bucket]["sales_taxable"] - b_taxable, 2)
             rates_data[bucket]["cgst"] = round(rates_data[bucket]["cgst"] - b_cgst, 2)
@@ -3414,21 +4179,24 @@ def gst_drilldown():
         by_rate = {}
         for it in dn_items:
             pct = float(it.get('gst_pct', 0))
-            bucket = "18" if pct >= 12 else ("5" if pct > 0 else "0")
-            by_rate.setdefault(bucket, []).append(it)
+            bucket, b_gst_pct = classify_gst_bucket(pct)
+            if not bucket:
+                continue
+            by_rate.setdefault(bucket, []).append((it, b_gst_pct))
 
-        for bucket, it_list in by_rate.items():
+        for bucket, items_with_rate in by_rate.items():
+            it_list = [x[0] for x in items_with_rate]
+            b_gst_pct = items_with_rate[0][1]
             b_taxable = sum(round(float(x.get('qty', 1)) * float(x.get('price', 0)), 2) for x in it_list)
-            b_gst_pct = 18.0 if bucket == "18" else (5.0 if bucket == "5" else 0.0)
             if is_inter:
-                b_igst = round(b_taxable * b_gst_pct / 100, 2)
+                b_igst = round(b_taxable * (b_gst_pct / 100), 2)
                 b_cgst = b_sgst = 0.0
             else:
-                b_cgst = round(b_taxable * (b_gst_pct / 2) / 100, 2)
-                b_sgst = round(b_taxable * (b_gst_pct / 2) / 100, 2)
+                b_cgst = round(b_taxable * (b_gst_pct / 200), 2)
+                b_sgst = round(b_taxable * (b_gst_pct / 200), 2)
                 b_igst = 0.0
-            b_tax = b_cgst + b_sgst + b_igst
-            b_total = b_taxable + b_tax
+            b_tax = round(b_cgst + b_sgst + b_igst, 2)
+            b_total = round(b_taxable + b_tax, 2)
 
             rates_data[bucket]["purchases_taxable"] = round(rates_data[bucket]["purchases_taxable"] - b_taxable, 2)
             rates_data[bucket]["total_value"] = round(rates_data[bucket]["total_value"] - b_total, 2)
@@ -3830,7 +4598,8 @@ def get_invoice(bill_id):
 @app.route('/api/sales/<bill_id>/export/excel')
 @login_required
 def export_single_sale_excel(bill_id):
-    import io, csv
+    import excel_engine
+    from flask import send_file
     uid  = get_uid()
     sale = query("SELECT * FROM sales WHERE bill_id=? AND user_id=?", (bill_id, uid), one=True)
     if not sale:
@@ -3838,116 +4607,278 @@ def export_single_sale_excel(bill_id):
     items = rows("SELECT * FROM sale_items WHERE sale_id=?", (sale['id'],))
     shop  = query("SELECT * FROM shops WHERE user_id=?", (uid,), one=True) or {}
 
-    output = io.StringIO()
-    writer = csv.writer(output)
-
-    # Header info
-    shop_name = shop.get('name') or 'BillZen Invoice'
-    writer.writerow([shop_name])
-    if shop.get('address'): writer.writerow(['Address:', shop.get('address')])
-    if shop.get('phone'):   writer.writerow(['Phone:', shop.get('phone')])
-    if shop.get('gstin'):   writer.writerow(['GSTIN:', shop.get('gstin')])
-    writer.writerow([])
-
-    # Bill details
-    cat_label = 'Kacha (Estimate / Cash Memo)' if sale.get('bill_category') == 'kacha' else 'Pakka (GST Tax Invoice)'
-    writer.writerow(['Invoice No:', sale['bill_id'], 'Date:', sale['sale_date']])
-    writer.writerow(['Customer Name:', sale['customer_name'], 'Phone:', sale.get('customer_phone') or '', 'Khata Pen No:', sale.get('khata_pen_no') or ''])
-    writer.writerow(['Bill Category:', cat_label, 'Bill Type:', sale.get('bill_type') or 'retail'])
-    writer.writerow(['Payment Mode:', sale.get('payment_mode') or 'Cash', 'Status:', sale.get('payment_status') or 'Paid'])
-    writer.writerow([])
-
-    # Items Table
-    writer.writerow(['#', 'Product Name', 'HSN/SAC', 'Quantity', 'Rate (₹)', 'GST %', 'Amount (₹)'])
-    for idx, it in enumerate(items, 1):
-        writer.writerow([
-            idx,
-            it.get('product', ''),
-            it.get('hsn_code', ''),
-            it.get('qty', 0),
-            it.get('price', 0),
-            f"{it.get('gst_pct', 0)}%",
-            it.get('amount', 0)
-        ])
-
-    writer.writerow([])
-    writer.writerow(['', '', '', '', '', 'Subtotal:', sale.get('subtotal', 0)])
-    if (sale.get('cgst_amount') or 0) > 0:
-        writer.writerow(['', '', '', '', '', 'CGST:', sale.get('cgst_amount', 0)])
-    if (sale.get('sgst_amount') or 0) > 0:
-        writer.writerow(['', '', '', '', '', 'SGST:', sale.get('sgst_amount', 0)])
-    if (sale.get('igst_amount') or 0) > 0:
-        writer.writerow(['', '', '', '', '', 'IGST:', sale.get('igst_amount', 0)])
-    if (sale.get('discount') or 0) > 0:
-        writer.writerow(['', '', '', '', '', 'Discount:', sale.get('discount', 0)])
-    writer.writerow(['', '', '', '', '', 'Grand Total:', sale.get('total_amount', 0)])
-    writer.writerow(['', '', '', '', '', 'Paid Amount:', sale.get('paid_amount', 0)])
-    due = max(0, (sale.get('total_amount') or 0) - (sale.get('paid_amount') or 0))
-    if due > 0:
-        writer.writerow(['', '', '', '', '', 'Due Balance:', due])
-
-    from flask import Response
+    bio = excel_engine.generate_single_invoice_excel(dict(shop), 'sales', dict(sale), [dict(i) for i in items])
     safe_name = "".join(c for c in (sale.get('customer_name') or '') if c.isalnum() or c in (' ', '_', '-')).strip().replace(' ', '_')
-    filename = f"{sale['bill_id']}_{safe_name or 'Bill'}.csv"
-    return Response(
-        "\ufeff" + output.getvalue(),
-        mimetype='text/csv; charset=utf-8',
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+    filename = f"Invoice_{sale['bill_id']}_{safe_name or 'Bill'}.xlsx"
+    return send_file(
+        bio,
+        as_attachment=True,
+        download_name=filename,
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
     )
+
+
+@app.route('/api/purchases/<path:purchase_ref>/export/excel')
+@login_required
+def export_single_purchase_excel(purchase_ref):
+    """Exports a single supplier purchase bill as a professional Excel document (Part 7 & Part 8)."""
+    import excel_engine
+    from flask import send_file
+    uid = get_uid()
+    ref = (purchase_ref or request.args.get('ref') or '').strip()
+    pur = query("""
+        SELECT * FROM purchases 
+        WHERE user_id=? 
+          AND (id=? OR purchase_id=? OR invoice_no=? 
+               OR UPPER(TRIM(invoice_no))=UPPER(TRIM(?)) 
+               OR UPPER(TRIM(purchase_id))=UPPER(TRIM(?)))
+    """, (uid, ref, ref, ref, ref, ref), one=True)
+    if not pur:
+        return jsonify({"success": False, "error": f"Purchase bill '{ref}' not found"}), 404
+
+    items = rows("SELECT * FROM purchase_items WHERE purchase_id=?", (pur['id'],))
+    shop  = query("SELECT * FROM shops WHERE user_id=?", (uid,), one=True) or {}
+
+    bio = excel_engine.generate_single_invoice_excel(dict(shop), 'purchase', dict(pur), [dict(i) for i in items])
+    pur_disp = pur.get('invoice_no') or pur.get('purchase_id') or f"PUR-{pur['id']}"
+    safe_name = "".join(c for c in (pur.get('supplier_name') or '') if c.isalnum() or c in (' ', '_', '-')).strip().replace(' ', '_')
+    filename = f"SupplierBill_{pur_disp}_{safe_name or 'Supplier'}.xlsx"
+    return send_file(
+        bio,
+        as_attachment=True,
+        download_name=filename,
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    )
+
+
+@app.route('/api/reports/export/excel')
+@login_required
+def export_reports_excel():
+    """
+    Exports the comprehensive 6-Sheet Financial Reports Workbook:
+    1. Dashboard Summary
+    2. Sales Register
+    3. Purchase Register
+    4. Stock Report
+    5. Customer Summary
+    6. GST Summary
+    """
+    import excel_engine
+    from flask import send_file
+    uid   = get_uid()
+    month = request.args.get('month', '').strip()
+    shop  = query("SELECT * FROM shops WHERE user_id=?", (uid,), one=True) or {}
+
+    # Query Sales
+    s_sql = "SELECT * FROM sales WHERE user_id=? AND cancelled=0"
+    s_params = [uid]
+    if month:
+        s_sql += " AND sale_date LIKE ?"
+        s_params.append(month + '%')
+    s_sql += " ORDER BY sale_date DESC"
+    sales_list = rows(s_sql, s_params)
+    for s in sales_list:
+        s['items'] = rows("SELECT * FROM sale_items WHERE sale_id=?", (s['id'],))
+
+    # Query Purchases
+    p_sql = "SELECT * FROM purchases WHERE user_id=?"
+    p_params = [uid]
+    if month:
+        p_sql += " AND bill_date LIKE ?"
+        p_params.append(month + '%')
+    p_sql += " ORDER BY bill_date DESC"
+    purch_list = rows(p_sql, p_params)
+
+    # Query Products & Customers
+    prods = rows("SELECT * FROM products WHERE user_id=? ORDER BY name ASC", (uid,))
+    custs = rows("SELECT * FROM customers WHERE user_id=? ORDER BY name ASC", (uid,))
+
+    bio = excel_engine.generate_reports_workbook(dict(shop), month, sales_list, purch_list, prods, custs)
+    period_tag = month if month else f"Full_{date.today().strftime('%Y%m%d')}"
+    filename = f"BillZen_Financial_Reports_{period_tag}.xlsx"
+    return send_file(
+        bio,
+        as_attachment=True,
+        download_name=filename,
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    )
+
+
+@app.route('/api/gst/export/excel')
+@login_required
+def export_gst_excel():
+    """
+    Exports the CA/Accountant-grade GST Audit Workbook:
+    - GSTR-1 & 3B Reconciliation Summary
+    - 18% Outward Register
+    - 5% Outward Register
+    - Inward Supplies / ITC Register
+    """
+    import excel_engine
+    from flask import send_file
+    uid   = get_uid()
+    month = request.args.get('month', str(date.today())[:7]).strip()
+    shop  = query("SELECT * FROM shops WHERE user_id=?", (uid,), one=True) or {}
+
+    # Gather Drilldown data using existing GST logic
+    sales = rows("SELECT * FROM sales WHERE user_id=? AND sale_date LIKE ? AND cancelled=0 AND (bill_category!='kacha' OR bill_category IS NULL) ORDER BY sale_date ASC", (uid, month + '%'))
+    rates_data = get_initial_gst_rates_data()
+    for s in sales:
+        s_items = rows("SELECT * FROM sale_items WHERE sale_id=?", (s['id'],))
+        is_inter = bool(s.get('is_interstate', 0) or s.get('igst_amount', 0) > 0)
+        by_rate = {}
+        for it in s_items:
+            pct = float(it.get('gst_pct', 0))
+            bucket, b_gst_pct = classify_gst_bucket(pct)
+            if not bucket:
+                continue
+            by_rate.setdefault(bucket, []).append((it, b_gst_pct))
+        for bucket, items_with_rate in by_rate.items():
+            it_list = [x[0] for x in items_with_rate]
+            b_gst_pct = items_with_rate[0][1]
+            b_taxable = sum(round(float(x.get('qty', 1)) * float(x.get('price', 0)), 2) for x in it_list)
+            if is_inter:
+                b_igst = round(b_taxable * (b_gst_pct / 100), 2)
+                b_cgst = b_sgst = 0.0
+            else:
+                b_cgst = round(b_taxable * (b_gst_pct / 200), 2)
+                b_sgst = round(b_taxable * (b_gst_pct / 200), 2)
+                b_igst = 0.0
+            b_tax = round(b_cgst + b_sgst + b_igst, 2)
+            b_total = round(b_taxable + b_tax, 2)
+            rates_data[bucket]["sales_taxable"] = round(rates_data[bucket]["sales_taxable"] + b_taxable, 2)
+            rates_data[bucket]["cgst"] = round(rates_data[bucket]["cgst"] + b_cgst, 2)
+            rates_data[bucket]["sgst"] = round(rates_data[bucket]["sgst"] + b_sgst, 2)
+            rates_data[bucket]["igst"] = round(rates_data[bucket]["igst"] + b_igst, 2)
+            rates_data[bucket]["total_tax"] = round(rates_data[bucket]["total_tax"] + b_tax, 2)
+            rates_data[bucket]["total_value"] = round(rates_data[bucket]["total_value"] + b_total, 2)
+            rates_data[bucket]["invoices"].append({
+                "bill_id": s['bill_id'],
+                "type": "Sale",
+                "date": s['sale_date'],
+                "party": s['customer_name'] or "Walk-in",
+                "gstin": s.get('customer_gstin') or "",
+                "is_interstate": is_inter,
+                "taxable": b_taxable,
+                "cgst": b_cgst,
+                "sgst": b_sgst,
+                "igst": b_igst,
+                "total_tax": b_tax,
+                "total": b_total,
+                "items": [{
+                    "product": x.get('product'),
+                    "hsn_code": x.get('hsn_code', ''),
+                    "qty": float(x.get('qty', 1)),
+                    "unit": x.get('unit', 'Pc'),
+                    "price": float(x.get('price', 0)),
+                    "gst_pct": float(x.get('gst_pct', b_gst_pct))
+                } for x in it_list]
+            })
+
+    drilldown_data = {"rates": rates_data, "month": month}
+    bio = excel_engine.generate_gst_ca_workbook(dict(shop), month, drilldown_data)
+    filename = f"BillZen_GST_Audit_Report_{month}.xlsx"
+    return send_file(
+        bio,
+        as_attachment=True,
+        download_name=filename,
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    )
+
 
 @app.route('/api/sales/export/excel')
 @login_required
 def export_sales_excel():
-    import io, csv
+    """Exports full Sales Register as dedicated professional Excel workbook (WOW standard)."""
+    import excel_engine
+    from flask import send_file
     uid   = get_uid()
     sales = rows("SELECT * FROM sales WHERE user_id=? ORDER BY sale_date DESC", (uid,))
-    output = io.StringIO()
-    writer = csv.writer(output)
-    writer.writerow(['Bill ID','Date','Customer','Phone','Khata Pen No','Category','Type','Subtotal','CGST','SGST','IGST','Discount','Total','Paid','Status','Payment Mode'])
-    for s in sales:
-        cat_label = 'Kacha (Estimate)' if s.get('bill_category') == 'kacha' else 'Pakka (GST)'
-        writer.writerow([s['bill_id'], s['sale_date'], s['customer_name'], s['customer_phone'], s.get('khata_pen_no') or '',
-                        cat_label, s['bill_type'], s['subtotal'], s['cgst_amount'], s['sgst_amount'],
-                        s['igst_amount'], s['discount'], s['total_amount'], s['paid_amount'],
-                        'Cancelled' if s.get('cancelled') else s['payment_status'], s['payment_mode']])
-    from flask import Response
-    return Response(output.getvalue(), mimetype='text/csv',
-                   headers={"Content-Disposition": "attachment;filename=sales_report.csv"})
+    shop  = query("SELECT * FROM shops WHERE user_id=?", (uid,), one=True) or {}
+    items = rows("""
+        SELECT si.*, s.bill_id, s.sale_date, s.customer_name, s.is_interstate, s.bill_category
+        FROM sale_items si
+        JOIN sales s ON s.id = si.sale_id
+        WHERE s.user_id=?
+        ORDER BY s.sale_date DESC, s.id DESC
+    """, (uid,))
+    bio = excel_engine.generate_sales_register_workbook(dict(shop), sales, items)
+    filename = f"Sales_Register_{date.today().strftime('%Y%m%d')}.xlsx"
+    return send_file(
+        bio,
+        as_attachment=True,
+        download_name=filename,
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    )
+
 
 @app.route('/api/purchases/export/excel')
 @login_required
 def export_purchases_excel():
-    import io, csv
-    uid  = get_uid()
-    purs = rows("SELECT * FROM purchases WHERE user_id=? ORDER BY bill_date DESC", (uid,))
-    output = io.StringIO()
-    writer = csv.writer(output)
-    writer.writerow(['Purchase ID','Date','Supplier','GSTIN','Invoice No','Subtotal','CGST','SGST','IGST','Total'])
-    for p in purs:
-        writer.writerow([p['purchase_id'], p['bill_date'], p['supplier_name'], p['supplier_gstin'],
-                        p['invoice_no'], p['subtotal'], p['cgst_amount'], p['sgst_amount'],
-                        p['igst_amount'], p['total_amount']])
-    from flask import Response
-    return Response(output.getvalue(), mimetype='text/csv',
-                   headers={"Content-Disposition": "attachment;filename=purchase_report.csv"})
+    """Exports full Purchase Register as dedicated professional Excel workbook (WOW standard)."""
+    import excel_engine
+    from flask import send_file
+    uid   = get_uid()
+    shop  = query("SELECT * FROM shops WHERE user_id=?", (uid,), one=True) or {}
+    purch = rows("SELECT * FROM purchases WHERE user_id=? ORDER BY bill_date DESC", (uid,))
+    items = rows("""
+        SELECT pi.*, p.purchase_id, p.invoice_no, p.bill_date, p.supplier_name, p.is_interstate
+        FROM purchase_items pi
+        JOIN purchases p ON p.id = pi.purchase_id
+        WHERE p.user_id=?
+        ORDER BY p.bill_date DESC, p.id DESC
+    """, (uid,))
+    bio = excel_engine.generate_purchase_register_workbook(dict(shop), purch, items)
+    filename = f"Purchase_Register_{date.today().strftime('%Y%m%d')}.xlsx"
+    return send_file(
+        bio,
+        as_attachment=True,
+        download_name=filename,
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    )
+
 
 @app.route('/api/products/export/excel')
 @login_required
 def export_products_excel():
-    import io, csv
-    uid  = get_uid()
-    prods = rows("SELECT * FROM products WHERE user_id=? ORDER BY name", (uid,))
-    output = io.StringIO()
-    writer = csv.writer(output)
-    writer.writerow(['Product Name','HSN Code','Category','Unit','GST%','Buy Price','Sell Price','Stock','Status'])
-    for p in prods:
-        status = 'Low Stock' if p['stock'] <= (p.get('low_stock') or 5) else 'In Stock'
-        writer.writerow([p['name'], p.get('hsn_code',''), p.get('category','General'),
-                        p.get('unit','Pcs'), p.get('gst_pct',18), p['buy_price'],
-                        p['sell_price'], p['stock'], status])
-    from flask import Response
-    return Response(output.getvalue(), mimetype='text/csv',
-                   headers={"Content-Disposition": "attachment;filename=products_report.csv"})
+    """Exports full Stock Valuation & Inventory Audit as dedicated professional Excel workbook (WOW standard)."""
+    import excel_engine
+    from flask import send_file
+    uid   = get_uid()
+    shop  = query("SELECT * FROM shops WHERE user_id=?", (uid,), one=True) or {}
+    prods = rows("SELECT * FROM products WHERE user_id=? ORDER BY name ASC", (uid,))
+    bio = excel_engine.generate_stock_inventory_workbook(dict(shop), prods)
+    filename = f"Stock_Report_{date.today().strftime('%Y%m%d')}.xlsx"
+    return send_file(
+        bio,
+        as_attachment=True,
+        download_name=filename,
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    )
+
+
+@app.route('/api/customers/<int:cid>/export/excel')
+@login_required
+def export_customer_ledger_excel(cid):
+    """Exports Customer Account Statement & Ledger as professional Excel workbook (WOW standard)."""
+    import excel_engine
+    from flask import send_file
+    uid = get_uid()
+    cust = query("SELECT * FROM customers WHERE id=? AND user_id=?", (cid, uid), one=True)
+    if not cust:
+        return jsonify({"success": False, "error": "Customer not found"}), 404
+    shop = query("SELECT * FROM shops WHERE user_id=?", (uid,), one=True) or {}
+    sales = rows("SELECT * FROM sales WHERE user_id=? AND customer_name=? AND cancelled=0 ORDER BY sale_date DESC", (uid, cust['name']))
+    payments = rows("SELECT * FROM customer_payments WHERE user_id=? AND customer_id=? ORDER BY paid_at DESC, id DESC", (uid, cid))
+    bio = excel_engine.generate_customer_ledger_workbook(dict(shop), dict(cust), sales, payments)
+    safe_name = "".join(c for c in (cust.get('name') or '') if c.isalnum() or c in (' ', '_', '-')).strip().replace(' ', '_')
+    filename = f"Customer_Ledger_{safe_name or 'Customer'}_{date.today().strftime('%Y%m%d')}.xlsx"
+    return send_file(
+        bio,
+        as_attachment=True,
+        download_name=filename,
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    )
 
 # ─────────────────────────────────────────────────────────────
 #  QUOTATIONS / ESTIMATES (Full Backend Persistence)
@@ -4302,7 +5233,9 @@ def master_get_shops():
     shop_owners = rows("""
         SELECT u.id, u.name, u.username, u.role, u.plan_status, u.trial_ends_at, 
                u.subscription_ends_at, u.is_master_admin, u.created_at,
-               s.name AS shop_name, s.phone AS shop_phone, s.gstin AS shop_gstin
+               s.name AS shop_name, s.phone AS shop_phone, s.gstin AS shop_gstin,
+               s.address AS shop_address, s.email AS shop_email, s.pan AS shop_pan,
+               s.state AS shop_state, s.state_code AS shop_state_code
         FROM users u
         LEFT JOIN shops s ON s.user_id = u.id
         WHERE u.admin_id IS NULL AND u.is_master_admin = 0
@@ -4342,6 +5275,55 @@ def master_extend_plan():
     db.commit()
     return jsonify({"success": True, "message": f"Plan updated successfully for user #{target_id}"})
 
+@app.route('/api/master/toggle-status', methods=['POST'])
+@login_required
+def master_toggle_status():
+    actual_uid = session.get('login_id') or session.get('user_id')
+    curr_user = query("SELECT is_master_admin FROM users WHERE id=?", (actual_uid,), one=True)
+    if not curr_user or not curr_user.get('is_master_admin'):
+        return jsonify({"success": False, "error": "Master Admin only"}), 403
+
+    d = request.get_json(silent=True) or {}
+    target_id = d.get('target_user_id')
+    action = (d.get('action') or '').strip().lower()
+    if not target_id:
+        return jsonify({"success": False, "error": "Target user ID required"}), 400
+
+    target = query("SELECT id, username, plan_status, subscription_ends_at FROM users WHERE id=? AND is_master_admin=0", (target_id,), one=True)
+    if not target:
+        return jsonify({"success": False, "error": "Client not found"}), 404
+
+    is_currently_suspended = target.get('plan_status') in ('suspended', 'stopped')
+    should_suspend = (action == 'suspend') if action in ('suspend', 'activate') else not is_currently_suspended
+
+    db = get_db()
+    if should_suspend:
+        db.execute("UPDATE users SET plan_status='suspended' WHERE id=?", (target_id,))
+        msg = f"Subscription stopped / suspended for @{target['username']}."
+        new_status = 'suspended'
+    else:
+        now = datetime.now()
+        sub_end = (target.get('subscription_ends_at') or '').strip()
+        has_future_sub = False
+        if sub_end:
+            try:
+                dt = datetime.strptime(sub_end, '%Y-%m-%d %H:%M:%S') if ' ' in sub_end else datetime.fromisoformat(sub_end)
+                if dt > now:
+                    has_future_sub = True
+            except Exception:
+                pass
+
+        if not has_future_sub:
+            new_end = (now + timedelta(days=30)).strftime('%Y-%m-%d %H:%M:%S')
+            db.execute("UPDATE users SET plan_status='active', subscription_ends_at=? WHERE id=?", (new_end, target_id))
+        else:
+            db.execute("UPDATE users SET plan_status='active' WHERE id=?", (target_id,))
+        msg = f"Subscription reactivated for @{target['username']}."
+        new_status = 'active'
+
+    db.commit()
+    return jsonify({"success": True, "message": msg, "plan_status": new_status})
+
 @app.route('/api/master/block-shop', methods=['POST'])
 @login_required
 def master_block_shop():
@@ -4355,10 +5337,97 @@ def master_block_shop():
     if not target_id:
         return jsonify({"success": False, "error": "Target user ID required"}), 400
 
+    target = query("SELECT id, username, plan_status FROM users WHERE id=?", (target_id,), one=True)
+    if not target:
+        return jsonify({"success": False, "error": "Target user not found"}), 404
+
+    is_currently_suspended = target.get('plan_status') in ('suspended', 'stopped')
     db = get_db()
-    db.execute("UPDATE users SET plan_status='expired', subscription_ends_at='2000-01-01 00:00:00', trial_ends_at='2000-01-01 00:00:00' WHERE id=?", (target_id,))
+    if is_currently_suspended:
+        new_end = (datetime.now() + timedelta(days=30)).strftime('%Y-%m-%d %H:%M:%S')
+        db.execute("UPDATE users SET plan_status='active', subscription_ends_at=? WHERE id=?", (new_end, target_id))
+        msg = f"Subscription reactivated for #{target_id}."
+    else:
+        db.execute("UPDATE users SET plan_status='suspended' WHERE id=?", (target_id,))
+        msg = f"Subscription stopped / suspended for #{target_id}."
     db.commit()
-    return jsonify({"success": True, "message": f"Shop #{target_id} blocked."})
+    return jsonify({"success": True, "message": msg})
+
+@app.route('/api/master/reset-password', methods=['POST'])
+@login_required
+def master_reset_password():
+    actual_uid = session.get('login_id') or session.get('user_id')
+    curr_user = query("SELECT is_master_admin FROM users WHERE id=?", (actual_uid,), one=True)
+    if not curr_user or not curr_user.get('is_master_admin'):
+        return jsonify({"success": False, "error": "Master Admin only"}), 403
+
+    d = request.get_json(silent=True) or {}
+    target_id = d.get('target_user_id')
+    new_password = (d.get('new_password') or '').strip()
+    if not target_id or not new_password:
+        return jsonify({"success": False, "error": "Target user ID and new password required"}), 400
+    if len(new_password) < 4:
+        return jsonify({"success": False, "error": "Password must be at least 4 characters"}), 400
+
+    target = query("SELECT id, username FROM users WHERE id=? AND admin_id IS NULL AND is_master_admin=0", (target_id,), one=True)
+    if not target:
+        return jsonify({"success": False, "error": "Client not found"}), 404
+
+    db = get_db()
+    db.execute("UPDATE users SET password=?, plain_password='' WHERE id=?", 
+               (generate_password_hash(new_password), target_id))
+    db.commit()
+    return jsonify({
+        "success": True, 
+        "message": f"Password reset successfully for @{target['username']}!"
+    })
+
+@app.route('/api/master/update-shop', methods=['POST'])
+@login_required
+def master_update_shop():
+    actual_uid = session.get('login_id') or session.get('user_id')
+    curr_user = query("SELECT is_master_admin FROM users WHERE id=?", (actual_uid,), one=True)
+    if not curr_user or not curr_user.get('is_master_admin'):
+        return jsonify({"success": False, "error": "Master Admin only"}), 403
+
+    d = request.get_json(silent=True) or {}
+    target_id = d.get('target_user_id')
+    if not target_id:
+        return jsonify({"success": False, "error": "Target user ID required"}), 400
+
+    target = query("SELECT id, username FROM users WHERE id=? AND admin_id IS NULL AND is_master_admin=0", (target_id,), one=True)
+    if not target:
+        return jsonify({"success": False, "error": "Client not found"}), 404
+
+    owner_name = (d.get('name') or '').strip()
+    shop_name  = (d.get('shop_name') or '').strip()
+    phone      = (d.get('phone') or '').strip()
+    gstin      = (d.get('gstin') or '').strip().upper()
+    state      = (d.get('state') or '').strip()
+    address    = (d.get('address') or '').strip()
+    email      = (d.get('email') or '').strip()
+
+    if not owner_name or not shop_name:
+        return jsonify({"success": False, "error": "Owner name and Shop name are required"}), 400
+
+    db = get_db()
+    db.execute("UPDATE users SET name=? WHERE id=?", (owner_name, target_id))
+    state_code = state[:2] if state else ''
+
+    shop_rec = query("SELECT id FROM shops WHERE user_id=?", (target_id,), one=True)
+    if shop_rec:
+        db.execute("""
+            UPDATE shops SET name=?, phone=?, gstin=?, state=?, state_code=?, address=?, email=?
+            WHERE user_id=?
+        """, (shop_name, phone, gstin, state, state_code, address, email, target_id))
+    else:
+        db.execute("""
+            INSERT INTO shops (user_id, name, phone, gstin, state, state_code, address, email)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (target_id, shop_name, phone, gstin, state, state_code, address, email))
+    db.commit()
+
+    return jsonify({"success": True, "message": f"Details updated for '{shop_name}'!"})
 
 @app.route('/api/master/add-shop', methods=['POST'])
 @login_required
@@ -4406,8 +5475,8 @@ def master_add_shop():
         trial_end = (datetime.now() + timedelta(days=7)).strftime('%Y-%m-%d %H:%M:%S')
 
     cur = db.execute(
-        """INSERT INTO users (name, username, password, role, plan_status, trial_ends_at, subscription_ends_at, is_master_admin) 
-           VALUES (?, ?, ?, 'admin', ?, ?, ?, 0)""",
+        """INSERT INTO users (name, username, password, plain_password, role, plan_status, trial_ends_at, subscription_ends_at, is_master_admin) 
+           VALUES (?, ?, ?, '', 'admin', ?, ?, ?, 0)""",
         (name, username, generate_password_hash(password), plan_status, trial_end, sub_end)
     )
     new_user_id = cur.lastrowid
@@ -4437,15 +5506,16 @@ def master_add_shop():
     }), 201
 
 # ─────────────────────────────────────────────────────────────
-#  MAIN
+#  STARTUP & MAIN
 # ─────────────────────────────────────────────────────────────
+ensure_database_ready()
+
 if __name__ == '__main__':
     import sys
     try:
         sys.stdout.reconfigure(encoding='utf-8')
     except Exception:
         pass
-    init_db()
     port = int(os.environ.get('PORT', 5000))
     print("\n" + "="*50)
     print("  BillZen AI - GST Billing Software")

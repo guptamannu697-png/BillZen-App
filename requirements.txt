@@ -4,4 +4,4 @@ anthropic
 gunicorn
 PyMuPDF
 pillow
-
+openpyxl
