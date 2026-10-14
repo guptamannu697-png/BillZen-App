@@ -53,6 +53,26 @@ class MasterClientManagerTestCase(unittest.TestCase):
         self.assertEqual(self.client.post('/api/master/reset-password', headers=client_headers, json={'target_user_id': 2, 'new_password': '123'}).status_code, 403)
         self.assertEqual(self.client.post('/api/master/update-shop', headers=client_headers, json={'target_user_id': 2, 'name': 'Hacker'}).status_code, 403)
 
+    def test_unauthenticated_dashboard_redirects_and_apis_return_401(self):
+        """Verify unauthenticated requests cannot access dashboard or protected business APIs."""
+        # 1. /dashboard must redirect to /login
+        res = self.client.get('/dashboard')
+        self.assertEqual(res.status_code, 302)
+        self.assertIn('/login', res.headers.get('Location', ''))
+
+        # 2. Protected APIs must return 401 Unauthorized
+        self.assertEqual(self.client.get('/api/reports/dashboard').status_code, 401)
+        self.assertEqual(self.client.get('/api/sales').status_code, 401)
+        self.assertEqual(self.client.get('/api/purchases').status_code, 401)
+        self.assertEqual(self.client.get('/api/shop').status_code, 401)
+        self.assertEqual(self.client.get('/api/customers').status_code, 401)
+        self.assertEqual(self.client.get('/api/gst/drilldown').status_code, 401)
+
+        # 3. /api/me returns loggedIn: False
+        res_me = self.client.get('/api/me')
+        self.assertEqual(res_me.status_code, 200)
+        self.assertFalse(res_me.get_json().get('loggedIn'))
+
     def test_master_get_shops_never_exposes_passwords(self):
         master_headers = self.login_master()
         res = self.client.get('/api/master/shops', headers=master_headers)
