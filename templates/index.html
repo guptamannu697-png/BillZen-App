@@ -375,6 +375,21 @@ tr:hover td{background:#FAFAFA;}
 
     <!-- ══════════════════ DASHBOARD ══════════════════ -->
     <div class="page active" id="page-dashboard" style="padding-bottom:70px;">
+      <!-- Client Trial Welcome Banner (shown for ordinary shopkeepers on free trial) -->
+      <div id="clientTrialWelcomeBanner" style="display:none;background:linear-gradient(135deg,#f5f3ff,#ede9fe);border:1.5px solid #c4b5fd;border-radius:14px;padding:14px 18px;margin-bottom:14px;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">
+        <div style="display:flex;align-items:center;gap:12px;">
+          <div style="font-size:30px;">🎉</div>
+          <div>
+            <div style="font-size:14px;font-weight:800;color:#6d28d9;" id="ctwb-title">Welcome to BillZen! ⏳ 7-Day Free Trial Active</div>
+            <div style="font-size:12px;color:#4b5563;margin-top:2px;" id="ctwb-sub">Aapka trial chalu hai! Computer ya phone se direct GST/Non-GST bill banayein ya inventory add karein.</div>
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;">
+          <button onclick="showPage('sales')" style="padding:7px 14px;background:#7c3aed;color:white;font-weight:700;font-size:12px;border:none;border-radius:8px;cursor:pointer;">🧾 Make First Bill</button>
+          <button onclick="showPage('products')" style="padding:7px 12px;background:white;color:#6d28d9;border:1px solid #c4b5fd;font-weight:700;font-size:12px;border-radius:8px;cursor:pointer;">🏷️ Add Products</button>
+        </div>
+      </div>
+
       <!-- 4 compact stat cards -->
       <div class="stat-grid" style="margin-bottom:12px;">
         <div class="stat-card" style="padding:12px 16px;">
@@ -2443,6 +2458,60 @@ tr:hover td{background:#FAFAFA;}
   </div>
 </div>
 
+<!-- Client Created Success Modal -->
+<div class="modal-overlay" id="clientCreatedSuccessModal">
+  <div class="modal" style="max-width:500px;text-align:center;">
+    <div style="font-size:42px;margin-bottom:8px;">🎉</div>
+    <h3 style="font-size:18px;font-weight:800;color:var(--dark);margin-bottom:6px;">Client Account Created Successfully!</h3>
+    <p style="font-size:12px;color:var(--gray);margin-bottom:14px;">
+      Client ka account taiyar ho gaya hai. Niche diye WhatsApp button se unhe sidha login details bhej sakte hain.
+    </p>
+
+    <div style="background:#f8fafc;border:1.5px solid #e2e8f0;border-radius:12px;padding:14px;text-align:left;font-size:12px;margin-bottom:16px;">
+      <div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #f1f5f9;">
+        <span style="color:var(--gray);">🏪 Shop Name:</span>
+        <b id="ccsm-shop" style="color:#6d28d9;">-</b>
+      </div>
+      <div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #f1f5f9;">
+        <span style="color:var(--gray);">👤 Owner Name:</span>
+        <b id="ccsm-owner">-</b>
+      </div>
+      <div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #f1f5f9;">
+        <span style="color:var(--gray);">📱 Mobile:</span>
+        <b id="ccsm-phone">-</b>
+      </div>
+      <div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #f1f5f9;">
+        <span style="color:var(--gray);">👤 Login Username:</span>
+        <b id="ccsm-username" style="color:#0f172a;background:#e0e7ff;padding:2px 8px;border-radius:6px;font-family:monospace;">-</b>
+      </div>
+      <div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #f1f5f9;">
+        <span style="color:var(--gray);">🔑 Password:</span>
+        <b id="ccsm-password" style="color:#0f172a;background:#fef3c7;padding:2px 8px;border-radius:6px;font-family:monospace;">-</b>
+      </div>
+      <div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #f1f5f9;">
+        <span style="color:var(--gray);">⏳ Plan:</span>
+        <b id="ccsm-plan" style="color:#16a34a;">-</b>
+      </div>
+      <div style="display:flex;justify-content:space-between;padding:5px 0;">
+        <span style="color:var(--gray);">🌐 Login Link:</span>
+        <span id="ccsm-url" style="color:#2563eb;font-weight:600;word-break:break-all;">-</span>
+      </div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:8px;">
+      <a id="ccsm-wa-btn" href="#" target="_blank" style="padding:11px 16px;background:#25d366;color:white;font-weight:700;font-size:13px;border-radius:10px;text-decoration:none;display:flex;align-items:center;justify-content:center;gap:8px;">
+        💬 WhatsApp Par Login Details Bhejein
+      </a>
+      <button class="btn btn-outline" onclick="copyClientSuccessDetails()" style="font-weight:700;font-size:12px;padding:9px;">
+        📋 Copy Login Credentials
+      </button>
+      <button class="btn btn-primary" onclick="closeModal('clientCreatedSuccessModal')" style="background:#7c3aed;font-weight:700;font-size:12px;padding:9px;">
+        ✅ Done
+      </button>
+    </div>
+  </div>
+</div>
+
 <!-- Master Client Details Modal (Master Admin Only) -->
 <div class="modal-overlay" id="masterClientDetailsModal">
   <div class="modal" style="max-width:680px;max-height:90vh;display:flex;flex-direction:column;">
@@ -2466,9 +2535,14 @@ tr:hover td{background:#FAFAFA;}
             <div style="font-size:12px;font-weight:800;color:#6d28d9;display:flex;align-items:center;gap:6px;">
               <span>🔐</span> <span>Login Credentials &amp; Access</span>
             </div>
-            <button type="button" onclick="toggleMcdResetBox()" class="btn btn-sm" style="background:#ede9fe;color:#6d28d9;border:1px solid #c4b5fd;font-size:11px;padding:3px 8px;font-weight:700;">
-              🔑 Reset Password
-            </button>
+            <div style="display:flex;gap:6px;align-items:center;">
+              <button type="button" onclick="sendMcdLoginWA()" class="btn btn-sm" style="background:#25d366;color:white;border:none;font-size:11px;padding:3px 9px;font-weight:700;">
+                💬 WhatsApp Login
+              </button>
+              <button type="button" onclick="toggleMcdResetBox()" class="btn btn-sm" style="background:#ede9fe;color:#6d28d9;border:1px solid #c4b5fd;font-size:11px;padding:3px 8px;font-weight:700;">
+                🔑 Reset Password
+              </button>
+            </div>
           </div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;font-size:12px;">
             <div>
@@ -3123,6 +3197,7 @@ let saleRowCount = 0, purRowCount = 0;
 let allProducts = [], allCustomers = [], allSuppliers = [], allUnits = [];
 
 const ROLE_ALLOWED_PAGES = {
+  master:  ['clients', 'dashboard', 'sales', 'quotation', 'challan', 'purchases', 'products', 'customers', 'suppliers', 'stock-adjust', 'returns', 'reports', 'gst', 'ai', 'settings', 'staff'],
   admin:   ['dashboard', 'sales', 'quotation', 'challan', 'purchases', 'products', 'customers', 'suppliers', 'stock-adjust', 'returns', 'reports', 'gst', 'ai', 'settings', 'staff'],
   manager: ['dashboard', 'sales', 'quotation', 'challan', 'purchases', 'products', 'customers', 'suppliers', 'stock-adjust', 'returns', 'reports', 'gst', 'ai'],
   staff:   ['sales', 'quotation', 'challan', 'purchases', 'products', 'customers', 'suppliers', 'stock-adjust', 'returns'],
@@ -3130,7 +3205,7 @@ const ROLE_ALLOWED_PAGES = {
 };
 
 function applyRolePermissions(user) {
-  const role = user.is_master_admin ? 'admin' : (user.role || 'staff');
+  const role = user.is_master_admin ? 'master' : (user.role || 'staff');
   const allowed = ROLE_ALLOWED_PAGES[role] || ROLE_ALLOWED_PAGES['staff'];
 
   // 1. Show or hide sidebar nav items
@@ -3177,6 +3252,18 @@ function applyRolePermissions(user) {
     } else {
       pb.style.background = '#fee2e2'; pb.style.color = '#dc2626'; pb.style.border = '1px solid #fecaca';
       pb.textContent = '⚠️ Trial Expired (Renew)';
+    }
+  }
+
+  // 4. Client Trial Welcome Banner
+  const ctwb = document.getElementById('clientTrialWelcomeBanner');
+  if (ctwb) {
+    if (!user.is_master_admin && user.plan && user.plan.status === 'trial') {
+      ctwb.style.display = 'flex';
+      const ctwbTitle = document.getElementById('ctwb-title');
+      if (ctwbTitle) ctwbTitle.textContent = `Welcome to BillZen, ${user.name || 'Merchant'}! ⏳ 7-Day Free Trial Active (${user.plan.days_left || 7} days left)`;
+    } else {
+      ctwb.style.display = 'none';
     }
   }
 }
@@ -3229,10 +3316,11 @@ window.onload = async () => {
   // Restore active page or route to role primary page
   try {
     const hashPage = window.location.hash ? window.location.hash.substring(1) : '';
-    const savedPage = hashPage || localStorage.getItem('billzen_active_page') || 'dashboard';
-    const userRole = currentUserData.is_master_admin ? 'admin' : (currentUserData.role || 'staff');
+    const savedPage = hashPage || localStorage.getItem('billzen_active_page');
+    const userRole = currentUserData.is_master_admin ? 'master' : (currentUserData.role || 'staff');
     const allowed = ROLE_ALLOWED_PAGES[userRole] || ROLE_ALLOWED_PAGES['staff'];
-    const targetPage = allowed.includes(savedPage) ? savedPage : (allowed.includes('sales') ? 'sales' : allowed[0]);
+    const defaultPage = currentUserData.is_master_admin ? 'clients' : 'dashboard';
+    const targetPage = (savedPage && allowed.includes(savedPage)) ? savedPage : defaultPage;
     showPage(targetPage);
   } catch(e) {}
 };
@@ -3718,7 +3806,7 @@ function toggleMobileMenu() {
 
 function showPage(name) {
   const user = window._currentUser || { role: 'admin' };
-  const userRole = user.is_master_admin ? 'admin' : (user.role || 'staff');
+  const userRole = user.is_master_admin ? 'master' : (user.role || 'staff');
   const allowed = ROLE_ALLOWED_PAGES[userRole] || ROLE_ALLOWED_PAGES['staff'];
 
   if (name === 'clients') {
@@ -3726,7 +3814,7 @@ function showPage(name) {
       toast('Access restricted: Master Founder only.', 'error');
       return;
     }
-  } else if (name === 'staff' && userRole !== 'admin') {
+  } else if (name === 'staff' && userRole !== 'admin' && userRole !== 'master') {
     toast('Access restricted: Only Shop Owner can manage staff.', 'error');
     return;
   } else if (!user.is_master_admin && !allowed.includes(name)) {
@@ -8330,6 +8418,16 @@ async function submitNewClient() {
     if (res.ok) {
       toast(`✅ Client '${shopName}' created successfully!`, 'success');
       closeModal('addClientModal');
+      // Open shareable credentials modal
+      openClientCreatedSuccessModal({
+        shopName,
+        ownerName,
+        phone,
+        username,
+        password,
+        plan,
+        state
+      });
       // Reset form
       document.getElementById('mc-shop-name').value = '';
       document.getElementById('mc-owner-name').value = '';
@@ -8349,6 +8447,85 @@ async function submitNewClient() {
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = '💾 Create Client Account'; }
   }
+}
+
+let _lastCreatedClientData = null;
+
+function openClientCreatedSuccessModal(data) {
+  _lastCreatedClientData = data;
+  document.getElementById('ccsm-shop').textContent = data.shopName;
+  document.getElementById('ccsm-owner').textContent = data.ownerName;
+  document.getElementById('ccsm-phone').textContent = data.phone || 'Not provided';
+  document.getElementById('ccsm-username').textContent = '@' + data.username;
+  document.getElementById('ccsm-password').textContent = data.password;
+
+  const planLabels = {
+    'trial': '⏳ 7-Day Free Trial',
+    '30': '💎 1 Month Active (30 Days)',
+    '365': '🌟 1 Year Active (365 Days)',
+    'lifetime': '👑 Lifetime Free Access'
+  };
+  document.getElementById('ccsm-plan').textContent = planLabels[data.plan] || '⏳ 7-Day Free Trial';
+
+  const loginUrl = window.location.origin + '/login';
+  document.getElementById('ccsm-url').textContent = loginUrl;
+
+  const cleanPh = (data.phone || '').replace(/[^0-9]/g, '');
+  const waMsg = `Namaste ${data.ownerName} ji! 🙏\n\n` +
+    `Aapki dukaan '${data.shopName}' ka BillZen Billing Software account activate ho gaya hai:\n\n` +
+    `🌐 Login Website: ${loginUrl}\n` +
+    `👤 Username: ${data.username}\n` +
+    `🔑 Password: ${data.password}\n` +
+    `⏳ Plan: ${planLabels[data.plan] || '7-Day Free Trial'}\n\n` +
+    `Aap turant login karke computer ya mobile se unlimited bills generate kar sakte hain!`;
+
+  const waBtn = document.getElementById('ccsm-wa-btn');
+  if (waBtn) {
+    waBtn.href = cleanPh.length >= 10
+      ? `https://wa.me/91${cleanPh.slice(-10)}?text=${encodeURIComponent(waMsg)}`
+      : `https://wa.me/?text=${encodeURIComponent(waMsg)}`;
+  }
+
+  openModal('clientCreatedSuccessModal');
+}
+
+function copyClientSuccessDetails() {
+  if (!_lastCreatedClientData) return;
+  const d = _lastCreatedClientData;
+  const loginUrl = window.location.origin + '/login';
+  const text = `BillZen Billing Software - Client Login Details\n` +
+    `Shop: ${d.shopName}\n` +
+    `Owner: ${d.ownerName}\n` +
+    `Website: ${loginUrl}\n` +
+    `Username: ${d.username}\n` +
+    `Password: ${d.password}\n` +
+    `Plan: ${d.plan === 'lifetime' ? 'Lifetime Access' : '7-Day Free Trial'}`;
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(() => {
+      toast('📋 Login details copied to clipboard!', 'success');
+    }).catch(() => {
+      toast('📋 Details: ' + d.username + ' / ' + d.password);
+    });
+  } else {
+    toast('📋 Details: ' + d.username + ' / ' + d.password);
+  }
+}
+
+function sendMcdLoginWA() {
+  if (!_masterCurrentClient) return;
+  const c = _masterCurrentClient;
+  const cleanPh = (c.shop_phone || '').replace(/[^0-9]/g, '');
+  const loginUrl = window.location.origin + '/login';
+  const msg = `Namaste ${c.name || ''} ji! 🙏\n\n` +
+    `Aapki dukaan '${c.shop_name || c.name}' ka BillZen Billing Software login details ye hain:\n\n` +
+    `🌐 Login Website: ${loginUrl}\n` +
+    `👤 Username: ${c.username}\n` +
+    `⏳ Plan: ${c.plan_info?.label || 'Active'}\n\n` +
+    `Aap turant login karke apni billing shuru kar sakte hain! Kisi bhi sahayata ke liye batayein.`;
+  const waURL = cleanPh.length >= 10
+    ? `https://wa.me/91${cleanPh.slice(-10)}?text=${encodeURIComponent(msg)}`
+    : `https://wa.me/?text=${encodeURIComponent(msg)}`;
+  window.open(waURL, '_blank');
 }
 
 // ═══════════════════════════════════════════════
