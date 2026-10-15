@@ -218,9 +218,21 @@ def ensure_database_ready():
     db_path = DATABASE
 
     # 1. Fast-path check for healthy existing database:
-    # Zero locks, zero writes, zero schema alterations.
+    # Zero locks, zero writes, zero schema alterations when no bootstrap is requested.
+    # If bootstrap credentials are provided in the environment, safely provision
+    # the dedicated Master Admin account without altering any schema or business data.
     existing_tables = _check_tables_read_only(db_path)
     if REQUIRED_CORE_TABLES.issubset(existing_tables):
+        raw_username = (os.environ.get('BILLZEN_BOOTSTRAP_ADMIN_USERNAME') or '').strip()
+        raw_password = (os.environ.get('BILLZEN_BOOTSTRAP_ADMIN_PASSWORD') or '').strip()
+        if raw_username and raw_password:
+            lock_path = db_path + ".init.lock"
+            with _DatabaseInitLock(lock_path, timeout=60):
+                db = get_db()
+                try:
+                    bootstrap_admin_account(db)
+                finally:
+                    db.close()
         return
 
     # If partial tables already exist without being fresh or complete:
@@ -5516,6 +5528,27 @@ if __name__ == '__main__':
         sys.stdout.reconfigure(encoding='utf-8')
     except Exception:
         pass
+
+    if len(sys.argv) > 1 and sys.argv[1] == 'create-master-admin':
+        if len(sys.argv) < 4:
+            print("Usage: python app.py create-master-admin <username> <password> [name]")
+            sys.exit(1)
+        cli_user = sys.argv[2].strip()
+        cli_pass = sys.argv[3].strip()
+        cli_name = sys.argv[4].strip() if len(sys.argv) > 4 else "Master Administrator"
+        if len(cli_pass) < 8:
+            print("Error: Password must be at least 8 characters.", file=sys.stderr)
+            sys.exit(1)
+        os.environ['BILLZEN_BOOTSTRAP_ADMIN_USERNAME'] = cli_user
+        os.environ['BILLZEN_BOOTSTRAP_ADMIN_PASSWORD'] = cli_pass
+        os.environ['BILLZEN_BOOTSTRAP_ADMIN_NAME'] = cli_name
+        db = get_db()
+        try:
+            bootstrap_admin_account(db)
+        finally:
+            db.close()
+        print(f"[SUCCESS] Master Admin '{cli_user}' provisioned successfully.")
+        sys.exit(0)
     port = int(os.environ.get('PORT', 5000))
     print("\n" + "="*50)
     print("  BillZen AI - GST Billing Software")

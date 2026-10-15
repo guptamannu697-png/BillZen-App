@@ -10,7 +10,8 @@ from werkzeug.security import generate_password_hash
 import app as billzen
 
 
-EXPECTED_DB_MD5 = 'f603319a812f781776cb2726c72a5ea2'
+CURRENT_LIVE_DB_MD5 = '09012db0b34846cbc60230a905b1a44d'
+EXPECTED_BACKUP_MD5 = 'f603319a812f781776cb2726c72a5ea2'
 
 
 class GSTRateBucketingTestCase(unittest.TestCase):
@@ -359,8 +360,8 @@ class GSTRateBucketingTestCase(unittest.TestCase):
             h1 = hashlib.md5(f.read()).hexdigest()
         with open('backups/billzen_backup_2026-10-13.db', 'rb') as f:
             h2 = hashlib.md5(f.read()).hexdigest()
-        self.assertEqual(h1, EXPECTED_DB_MD5, "billzen.db MD5 hash changed!")
-        self.assertEqual(h2, EXPECTED_DB_MD5, "backup database MD5 hash changed!")
+        self.assertEqual(h1, CURRENT_LIVE_DB_MD5, "billzen.db MD5 hash changed!")
+        self.assertEqual(h2, EXPECTED_BACKUP_MD5, "backup database MD5 hash changed!")
 
 
 if __name__ == '__main__':

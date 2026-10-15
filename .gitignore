@@ -13,6 +13,7 @@ billzen.db
 billzen_backup_*.db
 test_*.db
 *.bak
+*.lock
 backups/
 
 # Desktop shortcuts & OS files

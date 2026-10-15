@@ -1,4 +1,5 @@
 import os
+import sys
 import tempfile
 import unittest
 import sqlite3
@@ -300,6 +301,124 @@ class Step1StartupSecurityTestCase(unittest.TestCase):
         self.assertEqual(user['is_master_admin'], 0, "Ordinary user must NEVER be automatically elevated!")
         self.assertEqual(user['password'], 'hash123', "Existing password must NOT be overwritten!")
 
+    def test_existing_database_bootstrap_admin_preserves_all_data(self):
+        """Verify that setting bootstrap env vars on an existing healthy database
+        safely creates Master Admin without modifying or deleting ANY business data."""
+        # 1. Initialize healthy database
+        billzen.ensure_database_ready()
+
+        # 2. Populate realistic business data
+        conn = sqlite3.connect(self.test_db)
+        conn.row_factory = sqlite3.Row
+
+        # Existing tenant user and shop
+        conn.execute("INSERT INTO users (id, name, username, password, role, is_master_admin, plan_status) VALUES (10, 'Tenant Shopkeeper', 'tenant1', 'hash_pass_tenant', 'admin', 0, 'active')")
+        conn.execute("INSERT INTO shops (id, user_id, name, phone, gstin) VALUES (10, 10, 'Tenant Superstore', '9876543210', '07AAAAA0000A1Z5')")
+
+        # Customer, product, sale, purchase
+        conn.execute("INSERT INTO customers (id, user_id, name, phone) VALUES (1, 10, 'Customer Ramesh', '9111111111')")
+        conn.execute("INSERT INTO products (id, user_id, name, buy_price, sell_price, stock) VALUES (1, 10, 'Laptop Stand', 500.0, 999.0, 50)")
+        conn.execute("INSERT INTO sales (id, user_id, bill_id, customer_name, total_amount) VALUES (1, 10, 'INV-001', 'Customer Ramesh', 999.0)")
+        conn.execute("INSERT INTO sale_items (id, sale_id, product, qty, price, amount) VALUES (1, 1, 'Laptop Stand', 1, 999.0, 999.0)")
+        conn.execute("INSERT INTO purchases (id, user_id, purchase_id, invoice_no, supplier_name, total_amount) VALUES (1, 10, 'PUR-001', 'BILL-100', 'Supplier ABC', 5000.0)")
+        conn.execute("INSERT INTO purchase_items (id, purchase_id, product, qty, buy_price, amount) VALUES (1, 1, 'Laptop Stand', 10, 500.0, 5000.0)")
+        conn.commit()
+        conn.close()
+
+        # 3. Set bootstrap environment variables
+        os.environ['BILLZEN_BOOTSTRAP_ADMIN_USERNAME'] = 'master_founder@billzen.com'
+        os.environ['BILLZEN_BOOTSTRAP_ADMIN_PASSWORD'] = 'FounderPass1234!'
+        os.environ['BILLZEN_BOOTSTRAP_ADMIN_NAME'] = 'Founder Head'
+
+        # 4. Trigger startup on existing database
+        billzen.ensure_database_ready()
+
+        # 5. Verify Master Admin was created
+        conn = sqlite3.connect(self.test_db)
+        conn.row_factory = sqlite3.Row
+        master_user = conn.execute("SELECT * FROM users WHERE username='master_founder@billzen.com'").fetchone()
+        self.assertIsNotNone(master_user)
+        self.assertEqual(master_user['is_master_admin'], 1)
+        self.assertEqual(master_user['role'], 'admin')
+        self.assertEqual(master_user['plan_status'], 'lifetime')
+        self.assertTrue(check_password_hash(master_user['password'], 'FounderPass1234!'))
+
+        # 6. Verify 100% of existing business data is UNTOUCHED
+        tenant = conn.execute("SELECT * FROM users WHERE username='tenant1'").fetchone()
+        self.assertIsNotNone(tenant)
+        self.assertEqual(tenant['is_master_admin'], 0)
+        self.assertEqual(tenant['password'], 'hash_pass_tenant')
+        self.assertEqual(tenant['plan_status'], 'active')
+
+        shop = conn.execute("SELECT * FROM shops WHERE id=10").fetchone()
+        self.assertEqual(shop['name'], 'Tenant Superstore')
+        self.assertEqual(shop['gstin'], '07AAAAA0000A1Z5')
+
+        cust = conn.execute("SELECT * FROM customers WHERE id=1").fetchone()
+        self.assertEqual(cust['name'], 'Customer Ramesh')
+
+        prod = conn.execute("SELECT * FROM products WHERE id=1").fetchone()
+        self.assertEqual(prod['name'], 'Laptop Stand')
+        self.assertEqual(prod['stock'], 50)
+
+        sale = conn.execute("SELECT * FROM sales WHERE id=1").fetchone()
+        self.assertEqual(sale['bill_id'], 'INV-001')
+        self.assertEqual(sale['total_amount'], 999.0)
+
+        s_item = conn.execute("SELECT * FROM sale_items WHERE id=1").fetchone()
+        self.assertEqual(s_item['amount'], 999.0)
+
+        purchase = conn.execute("SELECT * FROM purchases WHERE id=1").fetchone()
+        self.assertEqual(purchase['invoice_no'], 'BILL-100')
+        self.assertEqual(purchase['total_amount'], 5000.0)
+
+        p_item = conn.execute("SELECT * FROM purchase_items WHERE id=1").fetchone()
+        self.assertEqual(p_item['amount'], 5000.0)
+
+        # 7. Subsequent startup runs are idempotent
+        billzen.ensure_database_ready()
+        master_count = conn.execute("SELECT COUNT(*) FROM users WHERE username='master_founder@billzen.com'").fetchone()[0]
+        self.assertEqual(master_count, 1)
+        conn.close()
+
+        # 8. Test Master Admin login succeeds via API
+        client = billzen.app.test_client()
+        login_res = client.post('/api/login', json={
+            'username': 'master_founder@billzen.com',
+            'password': 'FounderPass1234!'
+        })
+        self.assertEqual(login_res.status_code, 200)
+        self.assertTrue(login_res.get_json()['success'])
+        me_res = client.get('/api/me')
+        self.assertEqual(me_res.status_code, 200)
+        self.assertTrue(me_res.get_json()['is_master_admin'])
+
+    def test_cli_create_admin_utility_on_existing_database(self):
+        """Verify the standalone create_admin.py script on an existing database."""
+        import subprocess
+        billzen.ensure_database_ready()
+
+        # Run create_admin.py via subprocess against self.test_db
+        env = os.environ.copy()
+        env['DATABASE_PATH'] = self.test_db
+
+        proc = subprocess.run(
+            [sys.executable, 'create_admin.py', 'cli_master', 'CliMasterPass123!', 'CLI Master'],
+            env=env,
+            capture_output=True,
+            text=True
+        )
+        self.assertEqual(proc.returncode, 0, f"create_admin.py failed: {proc.stderr}")
+        self.assertIn("Success! Master Admin 'cli_master' created successfully", proc.stdout)
+
+        conn = sqlite3.connect(self.test_db)
+        conn.row_factory = sqlite3.Row
+        u = conn.execute("SELECT * FROM users WHERE username='cli_master'").fetchone()
+        conn.close()
+        self.assertIsNotNone(u)
+        self.assertEqual(u['is_master_admin'], 1)
+        self.assertTrue(check_password_hash(u['password'], 'CliMasterPass123!'))
+
     def test_short_bootstrap_password_rejected(self):
         """Verify that passwords shorter than 8 characters are rejected for bootstrap admin."""
         os.environ['BILLZEN_BOOTSTRAP_ADMIN_USERNAME'] = 'short_admin'
@@ -315,3 +434,4 @@ class Step1StartupSecurityTestCase(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
