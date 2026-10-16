@@ -5,3 +5,4 @@ gunicorn
 PyMuPDF
 pillow
 openpyxl
+libsql

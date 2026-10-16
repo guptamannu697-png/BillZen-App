@@ -929,7 +929,7 @@ tr:hover td{background:#FAFAFA;}
         <div style="display:flex;gap:6px;flex-wrap:wrap;">
           <button onclick="exportReportMonth()" style="padding:6px 12px;background:#7c3aed;color:white;border:none;border-radius:7px;cursor:pointer;font-size:11px;font-weight:700;">📊 Export Month (Excel)</button>
           <button onclick="window.location.href='/api/reports/export/excel'; toast('📊 Downloading 6-Sheet Master Reports Workbook...');" style="padding:6px 12px;background:#22c55e;color:white;border:none;border-radius:7px;cursor:pointer;font-size:11px;font-weight:700;">📊 Export All (Excel)</button>
-          <button onclick="openTallyModal()" style="padding:6px 12px;background:#0369a1;color:white;border:none;border-radius:7px;cursor:pointer;font-size:11px;font-weight:700;">🏦 Tally XML</button>
+          <button onclick="openTallyModal()" style="padding:6px 12px;background:#0369a1;color:white;border:none;border-radius:7px;cursor:pointer;font-size:11px;font-weight:700;">🏦 Tally XML <span style="font-size:10px;background:#fef3c7;color:#92400e;padding:1px 6px;border-radius:10px;margin-left:4px;">Coming soon / Under validation</span></button>
           <button onclick="backupData()" style="padding:6px 12px;background:#f3f0ff;color:#7c3aed;border:1.5px solid #e9d5ff;border-radius:7px;cursor:pointer;font-size:11px;font-weight:700;">⬇️ Backup</button>
           <button onclick="document.getElementById('restoreInputRep').click()" style="padding:6px 12px;background:#f0fdf4;color:#16a34a;border:1.5px solid #bbf7d0;border-radius:7px;cursor:pointer;font-size:11px;font-weight:700;">⬆️ Restore</button>
           <input type="file" id="restoreInputRep" accept=".json" style="display:none;" onchange="restoreData(this)">
@@ -1874,16 +1874,22 @@ tr:hover td{background:#FAFAFA;}
   <div class="modal" style="max-width:780px;width:95%;max-height:92vh;display:flex;flex-direction:column;">
     <div class="modal-header" style="flex-shrink:0;">
       <div>
-        <div style="font-size:16px;font-weight:800;color:#0369a1;display:flex;align-items:center;gap:8px;">
+        <div style="font-size:16px;font-weight:800;color:#0369a1;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
           <span>🏛️ Tally XML Export V2</span>
-          <span style="font-size:11px;background:#e0f2fe;color:#0369a1;padding:2px 8px;border-radius:12px;font-weight:700;">Item Invoice & Reconciliation</span>
+          <span style="font-size:11px;background:#fef3c7;color:#92400e;padding:2px 8px;border-radius:12px;font-weight:700;border:1px solid #fde68a;">Coming soon / Under validation</span>
         </div>
         <div style="font-size:12px;color:var(--gray);margin-top:2px;">Rate-wise Ledgers · Sequential Voucher Numbering · Golden CA Bridge</div>
       </div>
       <span class="modal-close" onclick="document.getElementById('tallyModal').style.display='none'">✕</span>
     </div>
     <div class="modal-body" style="overflow-y:auto;flex:1;padding:16px;">
-      
+
+      <!-- Integration Status Banner -->
+      <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:8px 12px;margin-bottom:12px;font-size:12px;color:#92400e;display:flex;align-items:center;gap:8px;">
+        <span>ℹ️</span>
+        <span><b>Tally Integration Status:</b> Coming soon / Under validation. (Not connected in demo)</span>
+      </div>
+
       <!-- Category & Date Filters -->
       <div style="background:#f8fafc;border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:14px;">
         <div style="display:grid;grid-template-columns:1.5fr 1fr 1fr;gap:10px;align-items:end;">
@@ -2029,8 +2035,8 @@ tr:hover td{background:#FAFAFA;}
         <button onclick="exportSelectedTally()" class="btn btn-primary" style="background:#0369a1;border-color:#0369a1;display:inline-flex;align-items:center;gap:6px;" title="Option 1: Export Item Invoice XML for direct Tally Import (No setup required)">
           📥 Download XML (Option 1)
         </button>
-        <button onclick="syncLiveToTally()" class="btn btn-success" style="background:#16a34a;border-color:#16a34a;color:white;display:inline-flex;align-items:center;gap:6px;" title="Option 2: Direct push to TallyPrime via Windows Connector / Live Sync">
-          ⚡ Live Sync to Tally (Option 2)
+        <button onclick="syncLiveToTally()" class="btn btn-success" style="background:#16a34a;border-color:#16a34a;color:white;display:inline-flex;align-items:center;gap:6px;" title="Option 2: Direct push to TallyPrime via Windows Connector / Live Sync (Coming soon / Under validation)">
+          ⚡ Live Sync to Tally (Option 2 - Coming soon)
         </button>
       </div>
     </div>
@@ -2157,14 +2163,14 @@ tr:hover td{background:#FAFAFA;}
         </details>
 
         <details style="border:1.5px solid #fca5a5;border-radius:10px;overflow:hidden;">
-          <summary style="padding:12px 16px;background:#fff1f2;cursor:pointer;font-weight:700;font-size:13px;color:#dc2626;">📈 Reports, GST Filing & CA Tally Export</summary>
+          <summary style="padding:12px 16px;background:#fff1f2;cursor:pointer;font-weight:700;font-size:13px;color:#dc2626;">📈 Reports, GST Filing & CA Tally Export (Coming soon / Under validation)</summary>
           <div style="padding:14px 16px;font-size:13px;line-height:1.9;color:#374151;">
             <b>Real-time Business Reports:</b> Total Sales, Purchases, Net Profit, Pending Dues — sab ek jagah.<br><br>
             <b>GST Reports & Filing:</b><br>
             → Month select karein → GSTR-1 & GSTR-2 ready<br>
             → <b>GSTR-1 JSON:</b> Download karke GST Portal pe direct upload karein<br>
             → <b>CA-Audit Multi-Sheet Excel:</b> Sales Register, Purchase Register, Stock Valuation, Customer Ledger aur GST Summary ek hi Excel workbook mein (plus dedicated Credit/Debit Note Excel registers)!<br><br>
-            <b>Tally Prime 1-Click Export (Strict Pakka Only):</b><br>
+            <b>Tally Prime 1-Click Export (Strict Pakka Only - Coming soon / Under validation):</b><br>
             → Reports → 🏦 <b>Tally XML</b> export karein → CA apne Tally Prime mein 5 second mein import kar lega.<br>
             → Kacha bills zero-risk ke liye automatically filter out ho jaate hain.<br><br>
             <div style="background:#fef2f2;border-radius:8px;padding:10px;font-size:12px;border:1px solid #fecaca;line-height:1.6;">
@@ -2366,7 +2372,7 @@ tr:hover td{background:#FAFAFA;}
       <ul style="font-size:12px;color:#4b5563;list-style:none;padding:0;line-height:1.8;">
         <li>✅ Unlimited Pakka & Kacha Bills</li>
         <li>✅ 1-Click WhatsApp Invoicing with UPI Link</li>
-        <li>✅ 1-Click Tally Prime XML Export</li>
+        <li>✅ 1-Click Tally Prime XML Export (Coming soon / Under validation)</li>
         <li>✅ Built-in AI Bill & PDF Scanner</li>
         <li>✅ Multi-User Cashier / Staff Logins</li>
       </ul>

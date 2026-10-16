@@ -59,9 +59,98 @@ _login_attempts = defaultdict(deque)
 
 
 # ─────────────────────────────────────────────────────────────
-#  DATABASE
+#  DATABASE & TURSO ADAPTER (Hybrid Cloud / Local SQLite)
 # ─────────────────────────────────────────────────────────────
+class RowDict(dict):
+    """Dictionary that also allows integer indexing like sqlite3.Row"""
+    def __getitem__(self, item):
+        if isinstance(item, int):
+            return list(self.values())[item]
+        return super().__getitem__(item)
+
+class LibsqlCursorWrapper:
+    def __init__(self, raw_cursor):
+        self._cur = raw_cursor
+
+    def __getattr__(self, name):
+        return getattr(self._cur, name)
+
+    def _wrap_row(self, row):
+        if row is None:
+            return None
+        if not hasattr(self._cur, 'description') or not self._cur.description:
+            return row
+        cols = [c[0] for c in self._cur.description]
+        return RowDict(zip(cols, row))
+
+    def fetchone(self):
+        r = self._cur.fetchone()
+        return self._wrap_row(r)
+
+    def fetchall(self):
+        if not hasattr(self._cur, 'description') or not self._cur.description:
+            return self._cur.fetchall()
+        cols = [c[0] for c in self._cur.description]
+        return [RowDict(zip(cols, r)) for r in self._cur.fetchall()]
+
+    def fetchmany(self, size=None):
+        if not hasattr(self._cur, 'description') or not self._cur.description:
+            return self._cur.fetchmany(size) if size is not None else self._cur.fetchmany()
+        cols = [c[0] for c in self._cur.description]
+        rows = self._cur.fetchmany(size) if size is not None else self._cur.fetchmany()
+        return [RowDict(zip(cols, r)) for r in rows]
+
+    @property
+    def lastrowid(self):
+        return getattr(self._cur, 'lastrowid', None)
+
+class LibsqlConnWrapper:
+    def __init__(self, raw_conn):
+        self._conn = raw_conn
+
+    def __getattr__(self, name):
+        return getattr(self._conn, name)
+
+    def cursor(self):
+        return LibsqlCursorWrapper(self._conn.cursor())
+
+    def execute(self, sql, params=()):
+        raw_cur = self._conn.execute(sql, params)
+        return LibsqlCursorWrapper(raw_cur)
+
+    def executescript(self, script):
+        if hasattr(self._conn, 'executescript'):
+            return self._conn.executescript(script)
+        # Semicolon-splitting fallback for remote libSQL connections
+        for stmt in script.strip().split(';'):
+            s = stmt.strip()
+            if s:
+                self._conn.execute(s)
+        self._conn.commit()
+
+    def commit(self):
+        return self._conn.commit()
+
+    def rollback(self):
+        return self._conn.rollback()
+
+    def close(self):
+        return self._conn.close()
+
+def is_turso_configured():
+    return bool(os.environ.get('TURSO_DATABASE_URL'))
+
 def get_db():
+    if is_turso_configured():
+        import libsql
+        turso_url = os.environ.get('TURSO_DATABASE_URL')
+        turso_token = os.environ.get('TURSO_AUTH_TOKEN', '')
+        raw_conn = libsql.connect(turso_url, auth_token=turso_token)
+        try:
+            raw_conn.execute("PRAGMA foreign_keys = ON")
+        except Exception:
+            pass
+        return LibsqlConnWrapper(raw_conn)
     db = sqlite3.connect(DATABASE)
     db.row_factory = sqlite3.Row
     db.execute("PRAGMA foreign_keys = ON")
@@ -192,6 +281,15 @@ class _DatabaseInitLock:
             self.fd = None
 
 def _check_tables_read_only(db_path):
+    if is_turso_configured():
+        try:
+            db = get_db()
+            cur = db.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            tables = set(r[0] for r in cur.fetchall())
+            db.close()
+            return tables
+        except Exception:
+            return set()
     if not os.path.exists(db_path):
         return set()
     try:
@@ -215,6 +313,29 @@ def ensure_database_ready():
       Initialized once with core tables, tax rules, indexes, and bootstrap admin.
     - Incomplete/corrupted database: Halts startup immediately with a clear error.
     """
+    if is_turso_configured():
+        existing_tables = _check_tables_read_only(DATABASE)
+        if REQUIRED_CORE_TABLES.issubset(existing_tables):
+            raw_username = (os.environ.get('BILLZEN_BOOTSTRAP_ADMIN_USERNAME') or '').strip()
+            raw_password = (os.environ.get('BILLZEN_BOOTSTRAP_ADMIN_PASSWORD') or '').strip()
+            if raw_username and raw_password:
+                db = get_db()
+                try:
+                    bootstrap_admin_account(db)
+                finally:
+                    db.close()
+            return
+
+        if len(existing_tables) > 0:
+            import sys
+            missing = REQUIRED_CORE_TABLES - existing_tables
+            err = f"FATAL: Database in Turso Cloud is incomplete or corrupt. Missing required tables: {sorted(missing)}. Halting boot to protect data."
+            print(f"\n{'!'*60}\n{err}\n{'!'*60}\n", file=sys.stderr)
+            raise RuntimeError(err)
+
+        init_db()
+        return
+
     db_path = DATABASE
 
     # 1. Fast-path check for healthy existing database:
@@ -263,7 +384,8 @@ def ensure_database_ready():
 
 def init_db():
     db = get_db()
-    db.execute("PRAGMA busy_timeout = 30000")
+    if not is_turso_configured():
+        db.execute("PRAGMA busy_timeout = 30000")
     cur = db.cursor()
     cur.execute("SELECT name FROM sqlite_master WHERE type='table'")
     current_tables = set(r[0] for r in cur.fetchall())
